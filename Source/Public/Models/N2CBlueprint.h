@@ -12,18 +12,18 @@
 #include "Utils/N2CLogger.h"
 #include "N2CBlueprint.generated.h"
 
-/**
- * @struct FN2CVersion
- * @brief Version information for N2CStruct format
- */
+ /**
+  * @struct FN2CVersion
+  * @brief Version information for N2CStruct format
+  */
 USTRUCT(BlueprintType)
 struct FN2CVersion
 {
     GENERATED_BODY()
 
-    /** Version string, always "1.0.0" in current spec */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Value;
+        /** Version string, always "1.0.0" in current spec */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString Value;
 
     FN2CVersion() : Value(TEXT("1.0.0")) {}
 };
@@ -58,22 +58,22 @@ struct FN2CMetadata
 {
     GENERATED_BODY()
 
-    /** Name of the Blueprint */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Name;
+        /** Name of the Blueprint */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString Name;
 
     /** Type of the Blueprint */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    EN2CBlueprintType BlueprintType;
+        EN2CBlueprintType BlueprintType;
 
-    /** The Blueprint class this graph belongs to */                                                                                                                                                                                 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")                                                                                                                                                             
-    FString BlueprintClass; 
+    /** The Blueprint class this graph belongs to */                                                                                                                                                                                 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString BlueprintClass;
 
     FN2CMetadata() : Name(TEXT("")), BlueprintType(EN2CBlueprintType::Normal), BlueprintClass(TEXT("")) {}
 };
 
 /**
- * @struct FN2CFlows 
+ * @struct FN2CFlows
  * @brief Contains all execution and data flow connections between nodes
  */
 USTRUCT(BlueprintType)
@@ -81,13 +81,30 @@ struct FN2CFlows
 {
     GENERATED_BODY()
 
-    /** Execution array. Each entry is a chain like "N1->N2->N3" */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TArray<FString> Execution;
+        /** Execution array. Each entry is a chain like "N1->N2->N3" */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        TArray<FString> Execution;
 
-    /** Data connections: a mapping from "N1.P4" to "N2.P3" */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TMap<FString, FString> Data;
+    /**
+     * Data connections: maps a source output pin "N1.P4" to the list of input
+     * pins it feeds, e.g. "N1.P4" -> ["N2.P3", "N5.P1"].
+     *
+     * This is a list-valued map because a single Blueprint output pin can drive
+     * multiple inputs (fan-out) - for example a split struct sub-pin wired into
+     * both a math node and a variable setter. The previous TMap<FString,FString>
+     * could only store one target per source, so every fan-out connection except
+     * the last was silently overwritten and lost from the export. An input pin,
+     * by contrast, can only ever be fed by one source, so keying by the source
+     * and listing targets is the representation that loses nothing.
+     *
+     * NOT a UPROPERTY: Unreal's reflection system (UHT) does not support nested
+     * containers (a TArray inside a TMap) - attempting to mark this UPROPERTY
+     * fails compilation with "Nested containers are not supported." This field
+     * is only ever read/written from C++ (translator, serializer, validator),
+     * never exposed to Blueprints or the details panel, so it doesn't need
+     * reflection - a plain member works identically for our purposes.
+     */
+    TMap<FString, TArray<FString>> Data;
 
     FN2CFlows()
     {
@@ -131,43 +148,43 @@ struct FN2CStructMember
 {
     GENERATED_BODY()
 
-    /** Member name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Name;
+        /** Member name */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString Name;
 
     /** Member type */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    EN2CStructMemberType Type;
+        EN2CStructMemberType Type;
 
     /** Type name - required for structs, enums, objects, classes, etc. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString TypeName;
+        FString TypeName;
 
     /** Container flags */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    bool bIsArray = false;
+        bool bIsArray = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    bool bIsSet = false;
+        bool bIsSet = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    bool bIsMap = false;
+        bool bIsMap = false;
 
     /** Key type for maps */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    EN2CStructMemberType KeyType;
+        EN2CStructMemberType KeyType;
 
     /** Key type name for maps (if needed) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString KeyTypeName;
+        FString KeyTypeName;
 
     /** Default value as string (if any) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString DefaultValue;
+        FString DefaultValue;
 
     /** Member comment (if any) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Comment;
+        FString Comment;
 
     FN2CStructMember()
         : Name(TEXT(""))
@@ -190,17 +207,17 @@ struct FN2CStruct
 {
     GENERATED_BODY()
 
-    /** Struct name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Name;
+        /** Struct name */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString Name;
 
     /** Struct comment */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Comment;
+        FString Comment;
 
     /** List of struct members */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TArray<FN2CStructMember> Members;
+        TArray<FN2CStructMember> Members;
 
     FN2CStruct()
         : Name(TEXT(""))
@@ -221,13 +238,13 @@ struct FN2CEnumValue
 {
     GENERATED_BODY()
 
-    /** Enum value name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Name;
-	
+        /** Enum value name */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString Name;
+
     /** Enum value comment (if any) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Comment;
+        FString Comment;
 
     FN2CEnumValue()
         : Name(TEXT(""))
@@ -245,17 +262,17 @@ struct FN2CEnum
 {
     GENERATED_BODY()
 
-    /** Enum name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Name;
+        /** Enum name */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString Name;
 
     /** Enum comment */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Comment;
+        FString Comment;
 
     /** List of enum values */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TArray<FN2CEnumValue> Values;
+        TArray<FN2CEnumValue> Values;
 
     FN2CEnum()
         : Name(TEXT(""))
@@ -301,21 +318,21 @@ struct FN2CGraph
 {
     GENERATED_BODY()
 
-    /** Name of the graph */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FString Name;
+        /** Name of the graph */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FString Name;
 
     /** Type of graph */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    EN2CGraphType GraphType;
+        EN2CGraphType GraphType;
 
     /** Array of all nodes in this graph */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TArray<FN2CNodeDefinition> Nodes;
+        TArray<FN2CNodeDefinition> Nodes;
 
     /** Execution and data flow connections for this graph */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FN2CFlows Flows;
+        FN2CFlows Flows;
 
     FN2CGraph()
         : GraphType(EN2CGraphType::EventGraph)
@@ -335,25 +352,25 @@ struct FN2CBlueprint
 {
     GENERATED_BODY()
 
-    /** Version information (always "1.0.0" in current spec) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FN2CVersion Version;
+        /** Version information (always "1.0.0" in current spec) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
+        FN2CVersion Version;
 
     /** Required metadata about the Blueprint */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    FN2CMetadata Metadata;
+        FN2CMetadata Metadata;
 
     /** Array of all graphs in the Blueprint */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TArray<FN2CGraph> Graphs;
+        TArray<FN2CGraph> Graphs;
 
     /** Array of all structs used in the Blueprint */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TArray<FN2CStruct> Structs;
+        TArray<FN2CStruct> Structs;
 
     /** Array of all enums used in the Blueprint */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Node to Code")
-    TArray<FN2CEnum> Enums;
+        TArray<FN2CEnum> Enums;
 
     FN2CBlueprint()
     {

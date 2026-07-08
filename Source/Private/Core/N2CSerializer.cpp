@@ -288,10 +288,19 @@ TSharedPtr<FJsonObject> FN2CSerializer::FlowsToJsonObject(const FN2CFlows& Flows
     JsonObject->SetArrayField(TEXT("execution"), ExecutionArray);
 
     // Add data flows object
+    // Each source (output) pin maps to an array of the input pins it feeds.
+    // The value is ALWAYS a JSON array - even for a single target - so consumers
+    // (this plugin, external LLMs, downstream scripts) can rely on one stable
+    // shape and never have to branch on "string vs array".
     TSharedPtr<FJsonObject> DataFlowsObject = MakeShared<FJsonObject>();
     for (const auto& DataFlow : Flows.Data)
     {
-        DataFlowsObject->SetStringField(DataFlow.Key, DataFlow.Value);
+        TArray<TSharedPtr<FJsonValue>> TargetArray;
+        for (const FString& Target : DataFlow.Value)
+        {
+            TargetArray.Add(MakeShared<FJsonValueString>(Target));
+        }
+        DataFlowsObject->SetArrayField(DataFlow.Key, TargetArray);
     }
     JsonObject->SetObjectField(TEXT("data"), DataFlowsObject);
 
@@ -750,9 +759,24 @@ bool FN2CSerializer::ParseFlowsFromJson(const TSharedPtr<FJsonObject>& JsonObjec
     OutFlows.Data.Empty();
     for (const auto& DataFlow : (*DataFlowsObject)->Values)
     {
-        if (DataFlow.Value->Type == EJson::String)
+        TArray<FString>& Targets = OutFlows.Data.FindOrAdd(DataFlow.Key);
+
+        if (DataFlow.Value->Type == EJson::Array)
         {
-            OutFlows.Data.Add(DataFlow.Key, DataFlow.Value->AsString());
+            // Current format: source pin -> array of target input pins.
+            for (const TSharedPtr<FJsonValue>& TargetValue : DataFlow.Value->AsArray())
+            {
+                if (TargetValue.IsValid() && TargetValue->Type == EJson::String)
+                {
+                    Targets.AddUnique(TargetValue->AsString());
+                }
+            }
+        }
+        else if (DataFlow.Value->Type == EJson::String)
+        {
+            // Backwards compatibility: older exports stored a single target as a
+            // bare string. Accept it so previously-saved JSON still round-trips.
+            Targets.AddUnique(DataFlow.Value->AsString());
         }
     }
 

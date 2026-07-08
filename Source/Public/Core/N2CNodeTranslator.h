@@ -112,6 +112,20 @@ private:
     /** Initialize basic node processing and validation */
     bool InitializeNodeProcessing(UK2Node* Node, FN2CNodeDefinition& OutNodeDef);
 
+    /**
+     * Pre-registers a node ID and IDs for all of its non-hidden pins, without
+     * building the node's full FN2CNodeDefinition. This must be run for every
+     * node in the graph BEFORE any node's flows are recorded (see
+     * GenerateN2CStruct). Data-flow recording only looks up IDs via FindRef and
+     * silently drops a connection if either endpoint hasn't been registered yet;
+     * since nodes are otherwise processed in a single pass over CollectedNodes,
+     * a wire into a node that appears later in that array would previously be
+     * dropped with no warning. Running this for every node first guarantees
+     * both endpoints of every wire already have IDs by the time flows are
+     * recorded, regardless of graph order.
+     */
+    void PreRegisterNodeAndPinIDs(UK2Node* Node);
+
     /** Process node type and core properties */
     void ProcessNodeTypeAndProperties(UK2Node* Node, FN2CNodeDefinition& OutNodeDef);
 

@@ -101,6 +101,19 @@ bool FN2CNodeTranslator::GenerateN2CStruct(const TArray<UK2Node*>& CollectedNode
     
     CurrentGraph = &MainGraph;
 
+    // Pre-pass: register node + pin IDs for EVERY node before recording any
+    // flows. ProcessNodeFlows only looks up IDs (FindRef) and silently drops a
+    // data-flow entry if either endpoint isn't registered yet, so without this
+    // pre-pass, any wire feeding a node that appears later in CollectedNodes
+    // than its source would be lost with no warning. See PreRegisterNodeAndPinIDs.
+    for (UK2Node* Node : CollectedNodes)
+    {
+        if (Node)
+        {
+            PreRegisterNodeAndPinIDs(Node);
+        }
+    }
+
     // Process each node
     for (UK2Node* Node : CollectedNodes)
     {
@@ -188,6 +201,48 @@ bool FN2CNodeTranslator::InitializeNodeProcessing(UK2Node* Node, FN2CNodeDefinit
     }
 
     return true;
+}
+
+void FN2CNodeTranslator::PreRegisterNodeAndPinIDs(UK2Node* Node)
+{
+    if (!Node)
+    {
+        return;
+    }
+
+    // Skip knot nodes entirely - they're just pass-through connections and are
+    // never given their own ID by InitializeNodeProcessing either.
+    if (Node->IsA<UK2Node_Knot>())
+    {
+        return;
+    }
+
+    // Register (or reuse) this node's own ID - same logic as InitializeNodeProcessing.
+    if (!NodeIDMap.Find(Node->NodeGuid))
+    {
+        FString NodeID = GenerateNodeID();
+        NodeIDMap.Add(Node->NodeGuid, NodeID);
+    }
+
+    // Register (or reuse) an ID for every non-hidden pin on this node, using the
+    // same local per-node counter ProcessNodePins uses, so the IDs it computes
+    // later for this same node are identical to the ones we assign here.
+    int32 RegisteredPinCount = 0;
+    for (UEdGraphPin* Pin : Node->Pins)
+    {
+        if (!Pin || Pin->bHidden)
+        {
+            continue;
+        }
+
+        if (!PinIDMap.Find(Pin->PinId))
+        {
+            FString PinID = GeneratePinID(RegisteredPinCount);
+            PinIDMap.Add(Pin->PinId, PinID);
+        }
+
+        RegisteredPinCount++;
+    }
 }
 
 bool FN2CNodeTranslator::ProcessNode(UK2Node* Node, FN2CNodeDefinition& OutNodeDef)
@@ -684,9 +739,21 @@ void FN2CNodeTranslator::ProcessNodePins(UK2Node* Node, FN2CNodeDefinition& OutN
 
         FN2CPinDefinition PinDef;
         
-        // Generate and map pin ID (using local counter for this node)
-        FString PinID = GeneratePinID(OutNodeDef.InputPins.Num() + OutNodeDef.OutputPins.Num());
-        PinIDMap.Add(Pin->PinId, PinID);
+        // Reuse the ID assigned during the pre-registration pass (see
+        // PreRegisterNodeAndPinIDs) if one already exists for this pin, so IDs
+        // referenced by data flows recorded for other nodes stay valid. Fall
+        // back to generating one here defensively in case this pin was somehow
+        // missed during pre-registration.
+        FString PinID;
+        if (FString* ExistingPinID = PinIDMap.Find(Pin->PinId))
+        {
+            PinID = *ExistingPinID;
+        }
+        else
+        {
+            PinID = GeneratePinID(OutNodeDef.InputPins.Num() + OutNodeDef.OutputPins.Num());
+            PinIDMap.Add(Pin->PinId, PinID);
+        }
         PinDef.ID = PinID;
         
         // Set pin name
@@ -868,10 +935,16 @@ void FN2CNodeTranslator::ProcessNodeFlows(UK2Node* Node, const TArray<UEdGraphPi
                         FString SourceRef = FString::Printf(TEXT("%s.%s"), *SourceNodeID, *SourcePinID);
                         FString TargetRef = FString::Printf(TEXT("%s.%s"), *TargetNodeID, *TargetPinID);
                 
-                        // Always store flow from output pin to input pin
+                        // Always store flow from output pin to input pin.
+                        // Data is a list-valued map keyed by the source (output)
+                        // pin, so multiple targets fanning out from one output
+                        // pin accumulate instead of overwriting each other.
+                        // AddUnique guards against recording the same connection
+                        // twice (it can be reached from either endpoint's pin
+                        // iteration).
                         if (ActualSourcePin->Direction == EGPD_Output)
                         {
-                            CurrentGraph->Flows.Data.Add(SourceRef, TargetRef);
+                            CurrentGraph->Flows.Data.FindOrAdd(SourceRef).AddUnique(TargetRef);
                     
                             // Log data flow
                             FString FlowContext = FString::Printf(TEXT("Added data flow: %s.%s (%s.%s) -> %s.%s (%s.%s)"),
@@ -885,7 +958,10 @@ void FN2CNodeTranslator::ProcessNodeFlows(UK2Node* Node, const TArray<UEdGraphPi
                         }
                         else
                         {
-                            CurrentGraph->Flows.Data.Add(TargetRef, SourceRef);
+                            // Here the pin being iterated is an input, so the
+                            // OUTPUT pin (TargetRef) is the correct map key and
+                            // the input (SourceRef) is the fan-out target.
+                            CurrentGraph->Flows.Data.FindOrAdd(TargetRef).AddUnique(SourceRef);
                     
                             // Log data flow
                             FString FlowContext = FString::Printf(TEXT("Added data flow: %s.%s (%s.%s) -> %s.%s (%s.%s)"),

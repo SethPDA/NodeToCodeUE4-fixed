@@ -208,7 +208,8 @@ bool FN2CBlueprintValidator::ValidateFlowReferences(const FN2CGraph& Graph, FStr
         }
     }
 
-    // Check data flows
+    // Check data flows. Each source pin maps to a list of target pins (fan-out),
+    // so validate the source key once and then every target in its list.
     for (const auto& DataFlow : Graph.Flows.Data)
     {
         // Validate source pin format (N#.P#)
@@ -221,14 +222,17 @@ bool FN2CBlueprintValidator::ValidateFlowReferences(const FN2CGraph& Graph, FStr
             return false;
         }
 
-        // Validate target pin format (N#.P#)
-        TArray<FString> TargetParts;
-        DataFlow.Value.ParseIntoArray(TargetParts, TEXT("."));
-        if (TargetParts.Num() != 2 || !NodeIds.Contains(TargetParts[0]))
+        // Validate every target pin format (N#.P#) in the fan-out list
+        for (const FString& TargetRef : DataFlow.Value)
         {
-            OutError = FString::Printf(TEXT("Invalid target pin format %s in graph %s"), *DataFlow.Value, *Graph.Name);
-            FN2CLogger::Get().LogError(OutError);
-            return false;
+            TArray<FString> TargetParts;
+            TargetRef.ParseIntoArray(TargetParts, TEXT("."));
+            if (TargetParts.Num() != 2 || !NodeIds.Contains(TargetParts[0]))
+            {
+                OutError = FString::Printf(TEXT("Invalid target pin format %s in graph %s"), *TargetRef, *Graph.Name);
+                FN2CLogger::Get().LogError(OutError);
+                return false;
+            }
         }
     }
 
