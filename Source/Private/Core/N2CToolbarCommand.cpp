@@ -55,7 +55,31 @@ void FN2CToolbarCommand::RegisterCommands()
     EUserInterfaceActionType::Button,
     FInputChord()
 );
-    
+
+    UI_COMMAND(
+        CopyGraphJsonV2Command,
+        "Copy Graph JSON (v2)",
+        "Copy the selected nodes (or the whole focused graph) as a lossless N2C Graph v2 document, for an AI to read and reply to with importable nodes",
+        EUserInterfaceActionType::Button,
+        FInputChord()
+    );
+
+    UI_COMMAND(
+        CopyBlueprintSummaryCommand,
+        "Copy Blueprint Summary",
+        "Copy the Blueprint's variables, functions, components and interfaces as JSON, so an AI doesn't have to guess at the Blueprint's state",
+        EUserInterfaceActionType::Button,
+        FInputChord()
+    );
+
+    UI_COMMAND(
+        ExportNodeCatalogCommand,
+        "Export Node Catalog...",
+        "Save a JSON catalog of the functions and macros an AI may reference when authoring a graph",
+        EUserInterfaceActionType::Button,
+        FInputChord()
+    );
+
     FN2CLogger::Get().Log(TEXT("N2C toolbar commands registered"), EN2CLogSeverity::Debug);
 }
 

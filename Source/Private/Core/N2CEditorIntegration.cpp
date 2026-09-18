@@ -19,6 +19,15 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
+#include "Bridge/N2CGraphExporterV2.h"
+#include "Bridge/N2CBlueprintSummaryExporter.h"
+#include "Bridge/N2CNodeCatalogExporter.h"
+#include "DesktopPlatformModule.h"
+#include "IDesktopPlatform.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "HAL/PlatformApplicationMisc.h"
+
 #if PLATFORM_WINDOWS
 #include "Windows/WindowsPlatformApplicationMisc.h"
 #endif
@@ -125,6 +134,153 @@ void FN2CEditorIntegration::ExecuteCopyJsonForEditor(TWeakPtr<FBlueprintEditor> 
         {
             FN2CLogger::Get().LogError(TEXT("Failed to translate nodes"));
         }
+    }
+}
+
+void FN2CEditorIntegration::ExecuteCopyGraphJsonV2ForEditor(TWeakPtr<FBlueprintEditor> InEditor)
+{
+    FN2CLogger::Get().Log(TEXT("ExecuteCopyGraphJsonV2ForEditor called"), EN2CLogSeverity::Debug);
+
+    TSharedPtr<FBlueprintEditor> Editor = InEditor.Pin();
+    if (!Editor.IsValid())
+    {
+        FN2CLogger::Get().LogError(TEXT("Invalid Blueprint Editor pointer"));
+        return;
+    }
+
+    UEdGraph* FocusedGraph = Editor->GetFocusedGraph();
+    if (!FocusedGraph)
+    {
+        FN2CLogger::Get().LogError(TEXT("No focused graph in Blueprint Editor"));
+        return;
+    }
+
+    // Scope is the current selection; empty means "export the whole graph" (docs §9.1)
+    TSet<UEdGraphNode*> SelectedNodes;
+    for (UObject* Selected : Editor->GetSelectedNodes())
+    {
+        if (UEdGraphNode* SelectedNode = Cast<UEdGraphNode>(Selected))
+        {
+            if (SelectedNode->GetGraph() == FocusedGraph)
+            {
+                SelectedNodes.Add(SelectedNode);
+            }
+        }
+    }
+
+    const FString JsonOutput = FN2CGraphExporterV2::ExportGraph(FocusedGraph, SelectedNodes, /*bPrettyPrint=*/true);
+    if (JsonOutput.IsEmpty())
+    {
+        FN2CLogger::Get().LogError(TEXT("N2C Graph v2 export produced no output"));
+        return;
+    }
+
+    FPlatformApplicationMisc::ClipboardCopy(*JsonOutput);
+
+    FNotificationInfo Info(NSLOCTEXT("NodeToCode", "GraphJsonV2Copied", "N2C Graph v2 JSON copied to clipboard"));
+    Info.bFireAndForget = true;
+    Info.FadeInDuration = 0.2f;
+    Info.FadeOutDuration = 0.5f;
+    Info.ExpireDuration = 2.0f;
+    FSlateNotificationManager::Get().AddNotification(Info);
+
+    FN2CLogger::Get().Log(TEXT("N2C Graph v2 JSON copied to clipboard successfully"), EN2CLogSeverity::Info);
+}
+
+void FN2CEditorIntegration::ExecuteCopyBlueprintSummaryForEditor(TWeakPtr<FBlueprintEditor> InEditor)
+{
+    FN2CLogger::Get().Log(TEXT("ExecuteCopyBlueprintSummaryForEditor called"), EN2CLogSeverity::Debug);
+
+    TSharedPtr<FBlueprintEditor> Editor = InEditor.Pin();
+    if (!Editor.IsValid())
+    {
+        FN2CLogger::Get().LogError(TEXT("Invalid Blueprint Editor pointer"));
+        return;
+    }
+
+    UBlueprint* Blueprint = Editor->GetBlueprintObj();
+    if (!Blueprint)
+    {
+        FN2CLogger::Get().LogError(TEXT("Blueprint Editor has no Blueprint object"));
+        return;
+    }
+
+    const FString JsonOutput = FN2CBlueprintSummaryExporter::ExportSummary(Blueprint, /*bPrettyPrint=*/true);
+    if (JsonOutput.IsEmpty())
+    {
+        FN2CLogger::Get().LogError(TEXT("Blueprint summary export produced no output"));
+        return;
+    }
+
+    FPlatformApplicationMisc::ClipboardCopy(*JsonOutput);
+
+    FNotificationInfo Info(NSLOCTEXT("NodeToCode", "BlueprintSummaryCopied", "Blueprint summary copied to clipboard"));
+    Info.bFireAndForget = true;
+    Info.FadeInDuration = 0.2f;
+    Info.FadeOutDuration = 0.5f;
+    Info.ExpireDuration = 2.0f;
+    FSlateNotificationManager::Get().AddNotification(Info);
+
+    FN2CLogger::Get().Log(TEXT("Blueprint summary copied to clipboard successfully"), EN2CLogSeverity::Info);
+}
+
+void FN2CEditorIntegration::ExecuteExportNodeCatalogForEditor(TWeakPtr<FBlueprintEditor> InEditor)
+{
+    FN2CLogger::Get().Log(TEXT("ExecuteExportNodeCatalogForEditor called"), EN2CLogSeverity::Debug);
+
+    const FString JsonOutput = FN2CNodeCatalogExporter::ExportCatalog(/*bPrettyPrint=*/true);
+    if (JsonOutput.IsEmpty())
+    {
+        FN2CLogger::Get().LogError(TEXT("Node catalog export produced no output"));
+        return;
+    }
+
+    // The Bridge/outbox folder (docs §13) doesn't exist until P5, so for now this command
+    // asks where to save, as docs §9.3 allows ("writes Bridge/outbox/node_catalog.json (or
+    // asks where to save it)").
+    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+    if (!DesktopPlatform)
+    {
+        FN2CLogger::Get().LogError(TEXT("Desktop platform module unavailable; cannot show save dialog"));
+        return;
+    }
+
+    const FString DefaultDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("NodeToCode"));
+    TArray<FString> OutFilenames;
+    const bool bSaved = DesktopPlatform->SaveFileDialog(
+        nullptr,
+        TEXT("Export Node Catalog"),
+        DefaultDirectory,
+        TEXT("node_catalog.json"),
+        TEXT("JSON Files (*.json)|*.json"),
+        EFileDialogFlags::None,
+        OutFilenames
+    );
+
+    if (!bSaved || OutFilenames.Num() == 0)
+    {
+        FN2CLogger::Get().Log(TEXT("Node catalog export cancelled by user"), EN2CLogSeverity::Info);
+        return;
+    }
+
+    if (FFileHelper::SaveStringToFile(JsonOutput, *OutFilenames[0]))
+    {
+        FNotificationInfo Info(FText::Format(
+            NSLOCTEXT("NodeToCode", "NodeCatalogSaved", "Node catalog saved to {0}"),
+            FText::FromString(OutFilenames[0])));
+        Info.bFireAndForget = true;
+        Info.FadeInDuration = 0.2f;
+        Info.FadeOutDuration = 0.5f;
+        Info.ExpireDuration = 3.0f;
+        FSlateNotificationManager::Get().AddNotification(Info);
+
+        FN2CLogger::Get().Log(
+            FString::Printf(TEXT("Node catalog saved to %s"), *OutFilenames[0]),
+            EN2CLogSeverity::Info);
+    }
+    else
+    {
+        FN2CLogger::Get().LogError(FString::Printf(TEXT("Failed to write node catalog to %s"), *OutFilenames[0]));
     }
 }
 
@@ -320,6 +476,64 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
         })
     );
 
+    // Map the Copy Graph JSON (v2) command
+    CommandList->MapAction(
+        FN2CToolbarCommand::Get().CopyGraphJsonV2Command,
+        FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
+        {
+            FN2CLogger::Get().Log(
+                FString::Printf(TEXT("Copy Graph JSON (v2) triggered for Blueprint: %s"), *BlueprintName),
+                EN2CLogSeverity::Info
+            );
+            ExecuteCopyGraphJsonV2ForEditor(WeakEditor);
+        }),
+        FCanExecuteAction::CreateLambda([WeakEditor]()
+        {
+            TSharedPtr<FBlueprintEditor> Editor = WeakEditor.Pin();
+            if (!Editor.IsValid())
+            {
+                return false;
+            }
+            return Editor->GetCurrentMode() == FBlueprintEditorApplicationModes::StandardBlueprintEditorMode;
+        })
+    );
+
+    // Map the Copy Blueprint Summary command
+    CommandList->MapAction(
+        FN2CToolbarCommand::Get().CopyBlueprintSummaryCommand,
+        FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
+        {
+            FN2CLogger::Get().Log(
+                FString::Printf(TEXT("Copy Blueprint Summary triggered for Blueprint: %s"), *BlueprintName),
+                EN2CLogSeverity::Info
+            );
+            ExecuteCopyBlueprintSummaryForEditor(WeakEditor);
+        }),
+        FCanExecuteAction::CreateLambda([WeakEditor]()
+        {
+            TSharedPtr<FBlueprintEditor> Editor = WeakEditor.Pin();
+            if (!Editor.IsValid())
+            {
+                return false;
+            }
+            return Editor->GetCurrentMode() == FBlueprintEditorApplicationModes::StandardBlueprintEditorMode;
+        })
+    );
+
+    // Map the Export Node Catalog command (not selection/graph dependent)
+    CommandList->MapAction(
+        FN2CToolbarCommand::Get().ExportNodeCatalogCommand,
+        FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
+        {
+            FN2CLogger::Get().Log(
+                FString::Printf(TEXT("Export Node Catalog triggered from Blueprint: %s"), *BlueprintName),
+                EN2CLogSeverity::Info
+            );
+            ExecuteExportNodeCatalogForEditor(WeakEditor);
+        }),
+        FCanExecuteAction::CreateLambda([]() { return true; })
+    );
+
     // Store in our map
     EditorCommandLists.Add(WeakEditor, CommandList);
     FN2CLogger::Get().Log(
@@ -349,7 +563,7 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
                 FN2CToolbarCommand::Get().CollectNodesCommand,
                 NAME_None,
                 NSLOCTEXT("NodeToCode", "TranslateLabel", "Node to Code"),
-                NSLOCTEXT("NodeToCode", "TranslateTooltip", "Translate selected Blueprint nodes to code"),
+                NSLOCTEXT("NodeToCode", "TranslateTooltip", "Translate the focused Blueprint graph to code (the whole graph, not just the selection)"),
                 FSlateIcon(FName("NodeToCodeStyle"), FName("NodeToCode.ToolbarButton"), FName("NodeToCode.ToolbarButton.Small"))
             );
 
@@ -361,6 +575,10 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
                     FMenuBuilder MenuBuilder(true, CommandList);
                     MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().OpenWindowCommand);
                     MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().CopyJsonCommand);
+                    MenuBuilder.AddSeparator();
+                    MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().CopyGraphJsonV2Command);
+                    MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().CopyBlueprintSummaryCommand);
+                    MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().ExportNodeCatalogCommand);
                     return MenuBuilder.MakeWidget();
                 }),
                 FText::GetEmpty(),

@@ -1,0 +1,225 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://protospatial.dev/schemas/n2c.graph.v2.schema.json",
+  "title": "N2C Graph v2",
+  "description": "Blueprint <-> C++ bridge document for NodeToCode (docs/BLUEPRINT_CPP_BRIDGE.md §7). Used both for the plugin's own export and for AI-authored graphs.",
+  "type": "object",
+  "required": ["format", "version", "graphs"],
+  "additionalProperties": true,
+  "properties": {
+    "format": { "const": "n2c.graph" },
+    "version": { "const": 2 },
+    "engine": { "type": "string", "examples": ["4.27"] },
+    "blueprint": {
+      "type": "string",
+      "description": "Target Blueprint asset path (/Game/.../BP_X) or name. Only used by the file bridge and a future MCP tool; window import uses the focused editor instead."
+    },
+    "summary": { "type": "string" },
+    "declarations": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string" },
+              "default": { "type": "string" },
+              "category": { "type": "string" },
+              "editable": { "type": "boolean" }
+            }
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "pure": { "type": "boolean" },
+              "const": { "type": "boolean" },
+              "inputs": { "type": "array", "items": { "$ref": "#/definitions/namedType" } },
+              "outputs": { "type": "array", "items": { "$ref": "#/definitions/namedType" } }
+            }
+          }
+        },
+        "custom_events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "inputs": { "type": "array", "items": { "$ref": "#/definitions/namedType" } }
+            }
+          }
+        },
+        "dispatchers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "inputs": { "type": "array", "items": { "$ref": "#/definitions/namedType" } }
+            }
+          }
+        }
+      }
+    },
+    "graphs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/graph" }
+    },
+    "symbols": {
+      "type": "object",
+      "description": "Exporter-only: C++ signature facts for the offline generator (§12.2.3). Authors never write this.",
+      "additionalProperties": true
+    }
+  },
+  "definitions": {
+    "namedType": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" }
+      }
+    },
+    "graph": {
+      "type": "object",
+      "required": ["nodes", "links"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "enum": ["event_graph", "function", "macro"] },
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/node" }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "string", "pattern": "^[A-Za-z0-9_]+\\..+$" }
+          }
+        },
+        "external_links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" }
+            }
+          }
+        },
+        "types": {
+          "type": "object",
+          "description": "Verbose, exporter-only: pin ref -> v2 type string. Informational; ignored on import.",
+          "additionalProperties": { "type": "string" }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "nodes"],
+            "additionalProperties": true,
+            "properties": {
+              "text": { "type": "string" },
+              "nodes": { "type": "array", "items": { "type": "string" } },
+              "color": {
+                "type": "array",
+                "minItems": 4,
+                "maxItems": 4,
+                "items": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_]+$" },
+        "kind": {
+          "type": "string",
+          "examples": [
+            "event", "custom_event", "call_function", "call_parent", "variable_get", "variable_set",
+            "self", "branch", "sequence", "macro", "cast", "make_struct", "break_struct", "select",
+            "switch_int", "switch_enum", "switch_string", "switch_name", "make_array", "spawn_actor",
+            "reroute", "function_entry", "function_result", "local_variables", "k2node"
+          ]
+        },
+        "defaults": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "pos": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        },
+        "comment": { "type": "string" },
+        "pure": { "type": "boolean" },
+        "class": { "type": "string" },
+        "function": { "type": "string" },
+        "variable": { "type": "string" },
+        "scope": { "enum": ["self", "local", "param", "external"] },
+        "event": { "type": "string" },
+        "name": { "type": "string" },
+        "macro": { "type": "string" },
+        "library": { "type": "string" },
+        "struct": { "type": "string" },
+        "enum": { "type": "string" },
+        "outputs": { "type": "integer", "minimum": 0 },
+        "options": { "type": "integer", "minimum": 0 },
+        "inputs": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "array" }
+          ]
+        },
+        "cases": {
+          "type": "array",
+          "items": { "oneOf": [{ "type": "string" }, { "type": "integer" }] }
+        },
+        "default_pin": { "type": "boolean" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string" },
+              "default": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

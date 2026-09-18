@@ -18,6 +18,11 @@ public:
     TSharedPtr<FUICommandInfo> CollectNodesCommand;
     TSharedPtr<FUICommandInfo> CopyJsonCommand;
 
+    // N2C Graph v2 bridge commands (docs/BLUEPRINT_CPP_BRIDGE.md §9, §10.1)
+    TSharedPtr<FUICommandInfo> CopyGraphJsonV2Command;
+    TSharedPtr<FUICommandInfo> CopyBlueprintSummaryCommand;
+    TSharedPtr<FUICommandInfo> ExportNodeCatalogCommand;
+
     // Command names and labels
     static const FName CommandName_Open;
     static const FName CommandName_Collect;

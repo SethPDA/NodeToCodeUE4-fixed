@@ -56,7 +56,16 @@ private:
 
     /** Execute copy blueprint JSON to clipboard for a specific editor */
     void ExecuteCopyJsonForEditor(TWeakPtr<FBlueprintEditor> InEditor);
-    
+
+    /** Copy the selection (or whole focused graph) as N2C Graph v2 JSON (docs/BLUEPRINT_CPP_BRIDGE.md §9.1) */
+    void ExecuteCopyGraphJsonV2ForEditor(TWeakPtr<FBlueprintEditor> InEditor);
+
+    /** Copy the Blueprint's variables/functions/components/interfaces as JSON (docs §9.2) */
+    void ExecuteCopyBlueprintSummaryForEditor(TWeakPtr<FBlueprintEditor> InEditor);
+
+    /** Save a node catalog JSON file for the AI to reference (docs §9.3) */
+    void ExecuteExportNodeCatalogForEditor(TWeakPtr<FBlueprintEditor> InEditor);
+
     /** Handle asset editor opened callback */
     void HandleAssetEditorOpened(UObject* Asset, IAssetEditorInstance* EditorInstance);
 

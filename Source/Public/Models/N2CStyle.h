@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Interfaces/IPluginManager.h"
+#include "Styling/SlateStyle.h"
 
 class N2CStyle : public FSlateStyleSet
 {

@@ -44,7 +44,9 @@ public class NodeToCode : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"DeveloperSettings"
+				"DeveloperSettings",
+				"AssetRegistry",
+				"DesktopPlatform"
 			}
 		);
 	}
