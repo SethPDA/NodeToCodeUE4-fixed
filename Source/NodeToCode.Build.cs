@@ -36,7 +36,8 @@ public class NodeToCode : ModuleRules
 				"ApplicationCore",
 				"Projects",
 				"EditorStyle",
-				"ToolMenus"
+				"ToolMenus",
+				"JsonUtilities"
 			}
 		);
 

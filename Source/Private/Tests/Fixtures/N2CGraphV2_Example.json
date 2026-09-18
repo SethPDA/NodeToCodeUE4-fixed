@@ -1,0 +1,61 @@
+{
+  "format": "n2c.graph",
+  "version": 2,
+  "engine": "4.27",
+  "blueprint": "/Game/PuzzleMechanics/NPC/BP_EnemyController",
+  "summary": "Alert check on BeginPlay and a damage multiplier helper",
+  "declarations": {
+    "variables": [
+      {"name": "bIsAlerted", "type": "bool", "default": "false"},
+      {"name": "PatrolPoints", "type": "array<vector>"}
+    ],
+    "functions": [
+      {"name": "GetDamageMultiplier", "pure": true,
+       "inputs": [{"name": "Distance", "type": "float"}],
+       "outputs": [{"name": "Multiplier", "type": "float"}]}
+    ]
+  },
+  "graphs": [
+    {
+      "name": "EventGraph",
+      "kind": "event_graph",
+      "nodes": [
+        {"id": "begin", "kind": "event", "event": "ReceiveBeginPlay"},
+        {"id": "alert", "kind": "variable_get", "variable": "bIsAlerted"},
+        {"id": "br", "kind": "branch"},
+        {"id": "print", "kind": "call_function", "function": "PrintString", "class": "KismetSystemLibrary",
+         "defaults": {"InString": "Alerted!", "Duration": "5.0"}},
+        {"id": "points", "kind": "variable_get", "variable": "PatrolPoints"},
+        {"id": "loop", "kind": "macro", "macro": "ForEachLoop"},
+        {"id": "tostr", "kind": "call_function", "function": "Conv_VectorToString", "class": "KismetStringLibrary"},
+        {"id": "print2", "kind": "call_function", "function": "PrintString", "class": "KismetSystemLibrary"}
+      ],
+      "links": [
+        ["begin.then", "br.execute"],
+        ["alert.bIsAlerted", "br.Condition"],
+        ["br.then", "print.execute"],
+        ["br.else", "loop.Exec"],
+        ["points.PatrolPoints", "loop.Array"],
+        ["loop.LoopBody", "print2.execute"],
+        ["loop.Array Element", "tostr.InVec"],
+        ["tostr.ReturnValue", "print2.InString"]
+      ],
+      "comments": [{"text": "Alert check", "nodes": ["begin", "alert", "br", "print"]}]
+    },
+    {
+      "name": "GetDamageMultiplier",
+      "kind": "function",
+      "nodes": [
+        {"id": "entry", "kind": "function_entry"},
+        {"id": "div", "kind": "call_function", "function": "Divide_FloatFloat", "class": "KismetMathLibrary",
+         "defaults": {"B": "1000.0"}},
+        {"id": "ret", "kind": "function_result"}
+      ],
+      "links": [
+        ["entry.then", "ret.execute"],
+        ["entry.Distance", "div.A"],
+        ["div.ReturnValue", "ret.Multiplier"]
+      ]
+    }
+  ]
+}
