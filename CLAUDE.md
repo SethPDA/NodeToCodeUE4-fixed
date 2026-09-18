@@ -4,18 +4,18 @@ UE4.27.2 port of the NodeToCode plugin (originally UE5.3+). Translates Blueprint
 
 ## Project Context
 
-- **Engine:** Unreal Engine 4.27.2 (installed at `F:\UE4\UE_4.27`)
-- **Test project:** `F:\UE4\Projects\Wiz98\Wiz98.uproject`
+- **Engine:** Unreal Engine 4.27 (installed at `C:\UE\UE_4.27`)
+- **Test project:** `D:\DEV\Unreal\VoidLine\VoidLine427\VoidLine.uproject` (C++ module `VoidLine`, editor target `VoidLineEditor`)
 - **Toolchain:** Visual Studio 2019 Community
-- **Platform:** Windows 10
+- **Platform:** Windows 11
 
 ## Key Paths
 
 | Path | Purpose |
 |------|---------|
-| `C:\NodeToCodeUE4` | Git repo root |
-| `.claude/worktrees/<worktree>/` | Active development worktree |
-| `F:\UE4\Projects\Wiz98\Plugins\NodeToCode` | Junction into worktree |
+| `D:\DEV\Unreal\VoidLine\VoidLine427\Plugins\NodeToCodeUE4-main` | Git repo root — this folder is both the working copy compiled by VoidLine and the plugin's own git checkout (remote `github.com/SethPDA/NodeToCodeUE4-fixed`, branch `main`) |
+
+No junction or worktree is needed: the plugin lives directly under the project's `Plugins/` folder and compiles together with the `VoidLine` module.
 
 ## Build Commands
 
@@ -23,25 +23,19 @@ Always close the UE4 editor before building. Live Coding blocks CLI builds.
 
 ```bash
 # Build
-"F:/UE4/UE_4.27/Engine/Build/BatchFiles/Build.bat" Wiz98Editor Win64 Development -Project="F:/UE4/Projects/Wiz98/Wiz98.uproject" -WaitMutex -FromMsBuild
+"C:/UE/UE_4.27/Engine/Build/BatchFiles/Build.bat" VoidLineEditor Win64 Development -Project="D:/DEV/Unreal/VoidLine/VoidLine427/VoidLine.uproject" -WaitMutex
 
 # Generate project files (after adding/removing source files or changing Build.cs)
-"F:/UE4/UE_4.27/Engine/Binaries/DotNET/UnrealBuildTool.exe" -projectfiles -project="F:/UE4/Projects/Wiz98/Wiz98.uproject" -game -engine -progress
+"C:/UE/UE_4.27/Engine/Binaries/DotNET/UnrealBuildTool.exe" -projectfiles -project="D:/DEV/Unreal/VoidLine/VoidLine427/VoidLine.uproject" -game -engine -progress
 ```
 
-## Junction Setup
-
-The plugin source is linked into the test project via a Windows junction. Check it before building:
+## Automated tests
 
 ```bash
-# Verify
-ls "F:/UE4/Projects/Wiz98/Plugins/NodeToCode/NodeToCode.uplugin"
-
-# Recreate if broken (replace <worktree> with actual worktree directory name)
-cmd //c "mklink /J F:\UE4\Projects\Wiz98\Plugins\NodeToCode C:\NodeToCodeUE4\.claude\worktrees\<worktree>"
+"C:/UE/UE_4.27/Engine/Binaries/Win64/UE4Editor-Cmd.exe" "D:/DEV/Unreal/VoidLine/VoidLine427/VoidLine.uproject" -ExecCmds="Automation RunTests NodeToCode;Quit" -TestExit="Automation Test Queue Empty" -unattended -nopause -nullrhi -log
 ```
 
-Junctions break if the target directory is deleted (e.g., worktree pruning). Always commit before ending a session.
+Always commit (and push, when asked) before ending a session.
 
 ## Architecture
 
