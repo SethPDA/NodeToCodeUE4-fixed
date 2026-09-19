@@ -49,6 +49,33 @@ Pipeline: **Collect -> Translate -> Serialize -> LLM -> Parse -> Display**
 
 See `docs/PROJECT_OVERVIEW.md` for full architecture details.
 
+## Blueprint <-> C++ Bridge (N2C Graph v2)
+
+A second, newer pipeline (separate from the v1 architecture above) lets an AI chat (e.g. claude.ai, no API key) read a Blueprint graph as JSON and write real, pasteable Blueprint nodes back. Spec: `docs/BLUEPRINT_CPP_BRIDGE.md` (~83KB; §15 has the phase table, which is the source of truth for scope/status — re-read it and diff against `git log` before resuming work, since it goes stale fast).
+
+**All new code lives under `Source/{Public,Private}/Bridge/`** and `Source/Private/Tests/N2CBridgeTests.cpp` — the v1 files above are untouched by this work.
+
+- **Status:** P0-P3 done (test scaffolding, v2 exporter + Blueprint summary + node catalog, v2 importer core, Import panel + Copy-as-nodes + authoring prompt). 12/12 automation tests passing (`NodeToCode.Bridge.*`, see Automated tests command above). Commits `d84a4c5`..`f4e8895`. P4 (manual LLM provider), P5 (folder bridge), P6+ (offline C++ generator, MCP, local model) are next/further out.
+- Key classes: `FN2CGraphExporterV2`, `FN2CBlueprintSummaryExporter`, `FN2CNodeCatalogExporter`, `FN2CTypeStringConverter`, `FN2CGraphDocument`/`FN2CGraphDocumentParser`, `FN2CImportReport`, `FN2CGraphImporter`.
+- **Lesson learned the hard way:** `FScopedTransaction::Cancel()` does NOT revert already-applied mutations — it only drops the transaction from the undo history (`UTransBuffer::Cancel()` in engine source just pops the undo buffer, no `Apply(Undo)`). To genuinely revert, let the transaction commit (destroy/reset it) and then call `GEditor->UndoTransaction()`. This is why `EN2CImportMode::ValidateOnly` uses that pattern instead of `Cancel()`.
+
+## Content Folder (prompting assets + schema, packaged with the plugin)
+
+These ship inside `Content/` so they're available at runtime/in-editor, not just as dev docs:
+
+| Path | Purpose |
+|------|---------|
+| `Content/Prompting/CodeGen_CPP.md` | v1 pipeline: system prompt for Blueprint -> C++ translation |
+| `Content/Prompting/CodeGen_CSharp.md` | v1 pipeline: system prompt for Blueprint -> C# (Unity) translation |
+| `Content/Prompting/CodeGen_JavaScript.md` | v1 pipeline: system prompt for Blueprint -> JavaScript translation |
+| `Content/Prompting/CodeGen_Python.md` | v1 pipeline: system prompt for Blueprint -> Python translation |
+| `Content/Prompting/CodeGen_Swift.md` | v1 pipeline: system prompt for Blueprint -> Swift translation |
+| `Content/Prompting/CodeGen_Pseudocode.md` | v1 pipeline: system prompt for Blueprint -> CalPoly-style pseudocode |
+| `Content/Prompting/BlueprintGraph_Authoring.md` | **v2 bridge**: the system prompt an AI chat uses to *author* N2C Graph v2 JSON — internal pin-name tables, semantic aliases, the full type grammar, and a worked example (docs §7.9). This is what you paste into claude.ai (or load via the future folder bridge) to have it write Blueprint graphs back. |
+| `Content/Schemas/n2c.graph.v2.schema.json` | JSON Schema (draft-07, permissive `additionalProperties`) for the N2C Graph v2 document format that `FN2CGraphDocumentParser`/`FN2CGraphImporter` consume |
+
+When the bridge work adds a new authoring/system prompt or schema, it belongs under `Content/Prompting/` or `Content/Schemas/` respectively, and should be listed here.
+
 ## UE4.27 Port Rules
 
 When writing new code or modifying existing code, follow these UE4.27 constraints:
@@ -83,6 +110,7 @@ See `docs/UE4_PORT_GUIDE.md` for the complete API change reference.
 
 ## Documentation
 
-- `docs/PROJECT_OVERVIEW.md` - Architecture, source layout, LLM providers, data flow
+- `docs/PROJECT_OVERVIEW.md` - Architecture, source layout, LLM providers, data flow (v1 pipeline)
 - `docs/UE4_PORT_GUIDE.md` - Every UE5->UE4.27 API change with tables
-- `docs/DEVELOPMENT_SETUP.md` - Junction setup, build commands, agent instructions
+- `docs/DEVELOPMENT_SETUP.md` - Junction setup, build commands, agent instructions (predates this being an in-project checkout; junction section is stale, see Key Paths above)
+- `docs/BLUEPRINT_CPP_BRIDGE.md` - Spec for the v2 Blueprint<->C++ bridge (see section above); §15 phase table is the source of truth for status
