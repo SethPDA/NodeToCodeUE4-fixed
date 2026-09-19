@@ -72,6 +72,11 @@ private:
     EN2CCodeLanguage GetTargetLanguage() const;
     FName GetActiveTheme() const;
 
+    // --- Manual provider paste-back (§11.1) ---
+    FReply OnManualSubmitClicked();
+    FReply OnManualCancelClicked();
+    FReply OnManualLoadResponseFileClicked();
+
     // --- Import panel (§10.2) ---
     FReply OnImportValidateClicked();
     FReply OnImportInsertClicked();
@@ -102,6 +107,7 @@ private:
     TSharedPtr<SWidget> ToolbarWidget;
     TSharedPtr<SComboBox<TSharedPtr<FString>>> GraphSelector;
     TArray<TSharedPtr<FString>> GraphNameOptions;
+    TSharedPtr<SMultiLineEditableTextBox> ManualResponseTextBox;
 
     TSharedPtr<STextBlock> ImportTargetLabel;
     TSharedPtr<SMultiLineEditableTextBox> ImportJsonTextBox;

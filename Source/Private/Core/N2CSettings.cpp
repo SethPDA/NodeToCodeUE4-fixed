@@ -82,6 +82,8 @@ FString UN2CSettings::GetActiveApiKey() const
             return UserSecrets->DeepSeek_API_Key;
         case EN2CLLMProvider::LMStudio:
             return "lm-studio"; // LM Studio just requires a dummy API key for its OpenAI endpoint
+        case EN2CLLMProvider::Manual:
+            return FString(); // Manual provider never sends an HTTP request, so no key is needed
         default:
             return FString();
     }
@@ -103,6 +105,8 @@ FString UN2CSettings::GetActiveModel() const
             return OllamaModel;
         case EN2CLLMProvider::LMStudio:
             return LMStudioModel;
+        case EN2CLLMProvider::Manual:
+            return TEXT("manual"); // Whatever model the user pastes into/out of - not sent anywhere
         default:
             return FString();
     }

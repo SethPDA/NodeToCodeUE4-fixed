@@ -35,6 +35,9 @@ public:
     virtual EN2CLLMProvider GetProviderType() const override { return EN2CLLMProvider::Anthropic; }
     virtual void GetProviderHeaders(TMap<FString, FString>& OutHeaders) const override { }
 
+    /** Cancel a pending request. No-op for HTTP-based providers; overridden by the Manual provider (docs §11.1) */
+    virtual void CancelPendingRequest() {}
+
 protected:
     // Common functionality for derived classes
     virtual void InitializeComponents();

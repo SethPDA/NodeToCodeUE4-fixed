@@ -278,6 +278,76 @@ void SN2CEditorWindow::Construct(const FArguments& InArgs)
                         SNew(STextBlock)
                         .Text(LOCTEXT("Translating", "Translating Blueprint to code..."))
                     ]
+
+                    // Manual (copy/paste) provider: paste the chat AI's reply back in (docs §11.1)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .HAlign(HAlign_Center)
+                    .Padding(0, 12, 0, 0)
+                    [
+                        SNew(SBox)
+                        .WidthOverride(420.f)
+                        .Visibility_Lambda([]() -> EVisibility
+                        {
+                            UN2CLLMModule* LLMModule = UN2CLLMModule::Get();
+                            return (LLMModule && LLMModule->IsManualProviderActive()) ? EVisibility::Visible : EVisibility::Collapsed;
+                        })
+                        [
+                            SNew(SVerticalBox)
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0, 0, 0, 4)
+                            [
+                                SNew(STextBlock)
+                                .Text(LOCTEXT("ManualHint", "Prompt copied to clipboard - paste it into Claude (or another chat AI), then paste the full reply below."))
+                                .AutoWrapText(true)
+                                .Justification(ETextJustify::Center)
+                            ]
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0, 0, 0, 4)
+                            [
+                                SNew(SBox)
+                                .MinDesiredHeight(120.f)
+                                [
+                                    SAssignNew(ManualResponseTextBox, SMultiLineEditableTextBox)
+                                    .HintText(LOCTEXT("ManualResponseHint", "Paste the AI's full reply here"))
+                                    .AllowMultiLine(true)
+                                    .AutoWrapText(true)
+                                ]
+                            ]
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .HAlign(HAlign_Center)
+                            [
+                                SNew(SHorizontalBox)
+
+                                + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+                                [
+                                    SNew(SButton)
+                                    .Text(LOCTEXT("ManualSubmit", "Submit"))
+                                    .ToolTipText(LOCTEXT("ManualSubmitTip", "Parse the pasted reply and show the generated code"))
+                                    .OnClicked(this, &SN2CEditorWindow::OnManualSubmitClicked)
+                                ]
+                                + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+                                [
+                                    SNew(SButton)
+                                    .Text(LOCTEXT("ManualLoadFile", "Load from file..."))
+                                    .ToolTipText(LOCTEXT("ManualLoadFileTip", "Load a saved N2C_Translation_*.json (or any text file) and submit it"))
+                                    .OnClicked(this, &SN2CEditorWindow::OnManualLoadResponseFileClicked)
+                                ]
+                                + SHorizontalBox::Slot().AutoWidth()
+                                [
+                                    SNew(SButton)
+                                    .Text(LOCTEXT("ManualCancel", "Cancel"))
+                                    .OnClicked(this, &SN2CEditorWindow::OnManualCancelClicked)
+                                ]
+                            ]
+                        ]
+                    ]
                 ]
             ]
 
@@ -786,6 +856,70 @@ EN2CCodeLanguage SN2CEditorWindow::GetTargetLanguage() const
 FName SN2CEditorWindow::GetActiveTheme() const
 {
     return FN2CEditorIntegration::Get().GetDefaultTheme(GetTargetLanguage());
+}
+
+// ─────────────────────────────────────────────
+// Manual provider paste-back (§11.1)
+// ─────────────────────────────────────────────
+
+FReply SN2CEditorWindow::OnManualSubmitClicked()
+{
+    if (ManualResponseTextBox.IsValid())
+    {
+        const FString PastedText = ManualResponseTextBox->GetText().ToString();
+        UN2CLLMModule::Get()->SubmitManualResponse(PastedText);
+        ManualResponseTextBox->SetText(FText::GetEmpty());
+    }
+    return FReply::Handled();
+}
+
+FReply SN2CEditorWindow::OnManualCancelClicked()
+{
+    UN2CLLMModule::Get()->CancelPendingRequest();
+    if (ManualResponseTextBox.IsValid())
+    {
+        ManualResponseTextBox->SetText(FText::GetEmpty());
+    }
+    if (StatusText.IsValid())
+    {
+        StatusText->SetText(LOCTEXT("Ready", "Ready"));
+    }
+    SetActivePanel(0); // Welcome
+    return FReply::Handled();
+}
+
+FReply SN2CEditorWindow::OnManualLoadResponseFileClicked()
+{
+    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+    if (!DesktopPlatform)
+    {
+        return FReply::Handled();
+    }
+
+    TArray<FString> OutFilenames;
+    const bool bOpened = DesktopPlatform->OpenFileDialog(
+        nullptr,
+        TEXT("Load LLM Response"),
+        FPaths::ProjectSavedDir(),
+        TEXT(""),
+        TEXT("JSON Files (*.json)|*.json|Text Files (*.txt)|*.txt|All Files (*.*)|*.*"),
+        EFileDialogFlags::None,
+        OutFilenames
+    );
+
+    if (bOpened && OutFilenames.Num() > 0)
+    {
+        FString FileText;
+        if (FFileHelper::LoadFileToString(FileText, *OutFilenames[0]))
+        {
+            if (ManualResponseTextBox.IsValid())
+            {
+                ManualResponseTextBox->SetText(FText::FromString(FileText));
+            }
+            UN2CLLMModule::Get()->SubmitManualResponse(FileText);
+        }
+    }
+    return FReply::Handled();
 }
 
 // ─────────────────────────────────────────────

@@ -75,6 +75,17 @@ public:
     /** Save translation files to disk */
     bool SaveTranslationToDisk(const FN2CTranslationResponse& Response, const FN2CBlueprint& Blueprint);
 
+    /** Cancel a pending Manual-provider request (no-op for other providers) and reset status to Idle (docs §11.1) */
+    UFUNCTION(BlueprintCallable, Category = "Node to Code | LLM Module")
+    void CancelPendingRequest();
+
+    /** Submit the user-pasted LLM reply text for the Manual provider (docs §11.1) */
+    void SubmitManualResponse(const FString& PastedResponseText);
+
+    /** True when the active provider is the Manual (copy/paste) provider */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Node to Code | LLM Module")
+    bool IsManualProviderActive() const { return Config.Provider == EN2CLLMProvider::Manual; }
+
 private:
     /** Generate file paths for translation */
     FString GenerateTranslationRootPath(const FString& BlueprintName) const;

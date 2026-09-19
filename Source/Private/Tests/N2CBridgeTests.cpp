@@ -24,6 +24,7 @@
 #include "Bridge/N2CTypeStringConverter.h"
 #include "Bridge/N2CGraphDocument.h"
 #include "Bridge/N2CGraphImporter.h"
+#include "LLM/Providers/N2CManualResponseParser.h"
 
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -991,6 +992,43 @@ bool FN2CImporterExtractJsonTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("A JSON object embedded in prose should be extracted"), FN2CGraphImporter::ExtractJsonDocument(Prose), Clean);
 
 	TestEqual(TEXT("Already-clean JSON should be returned unchanged"), FN2CGraphImporter::ExtractJsonDocument(Clean), Clean);
+
+	return true;
+}
+
+/**
+ * P4 (docs/BLUEPRINT_CPP_BRIDGE.md §11.1, §15): the Manual (copy/paste) provider's response
+ * parser must recover the "graphs" JSON object out of the model's raw chat reply - which, unlike
+ * an HTTP envelope, may have a <think> block, a code fence, and surrounding prose all at once.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FN2CManualResponseParserExtractTest, "NodeToCode.Bridge.Manual.ExtractFromPastedReply", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FN2CManualResponseParserExtractTest::RunTest(const FString& Parameters)
+{
+	const FString GraphsJson = TEXT("{\"graphs\":[{\"graph_name\":\"EventGraph\",\"graph_type\":\"EventGraph\",\"graph_class\":\"BP_Test\",")
+		TEXT("\"code\":{\"graphDeclaration\":\"\",\"graphImplementation\":\"void Test() {}\",\"implementationNotes\":\"n/a\"}}]}");
+
+	const FString PastedReply = FString::Printf(
+		TEXT("<think>Let me work through this Blueprint graph step by step...</think>")
+		TEXT("Sure, here is the code:\n\n```json\n%s\n```\n\nLet me know if you'd like anything changed!"),
+		*GraphsJson);
+
+	UN2CManualResponseParser* Parser = NewObject<UN2CManualResponseParser>();
+	Parser->Initialize();
+
+	FN2CTranslationResponse Response;
+	if (!TestTrue(TEXT("Parsing a <think>/fence/prose-wrapped reply should succeed"), Parser->ParseLLMResponse(PastedReply, Response)))
+	{
+		return false;
+	}
+
+	if (!TestEqual(TEXT("One graph should be extracted"), Response.Graphs.Num(), 1))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Graph name should round-trip"), Response.Graphs[0].GraphName, FString(TEXT("EventGraph")));
+	TestEqual(TEXT("Implementation code should round-trip"), Response.Graphs[0].Code.GraphImplementation, FString(TEXT("void Test() {}")));
 
 	return true;
 }

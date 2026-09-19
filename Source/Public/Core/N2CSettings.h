@@ -553,7 +553,8 @@ public:
                 return FN2CLLMModelUtils::GetDeepSeekPricing(DeepSeekModel).InputCost;
             case EN2CLLMProvider::Ollama:
             case EN2CLLMProvider::LMStudio:
-                return 0.0f; // Local models are free
+            case EN2CLLMProvider::Manual:
+                return 0.0f; // Local models and Manual copy/paste incur no API cost
             default:
                 return 0.0f;
         }
@@ -585,7 +586,8 @@ public:
                 return FN2CLLMModelUtils::GetDeepSeekPricing(DeepSeekModel).OutputCost;
             case EN2CLLMProvider::Ollama:
             case EN2CLLMProvider::LMStudio:
-                return 0.0f; // Local models are free
+            case EN2CLLMProvider::Manual:
+                return 0.0f; // Local models and Manual copy/paste incur no API cost
             default:
                 return 0.0f;
         }
