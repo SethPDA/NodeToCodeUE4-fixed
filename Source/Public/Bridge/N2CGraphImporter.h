@@ -23,7 +23,8 @@ enum class EN2CImportMode : uint8
 {
 	ValidateOnly,
 	InsertIntoGraph,
-	/** Not implemented until P3 (docs §8.5) */
+	/** Builds into a scratch graph and exports the result as clipboard text; never touches the
+	 * real target graph and never creates declarations (docs §8.5) */
 	CopyAsNodes
 };
 
@@ -43,7 +44,7 @@ struct FN2CImportResult
 	/** false if the report has any Error entry */
 	bool bSuccess = false;
 	FN2CImportReport Report;
-	/** Reserved for CopyAsNodes (P3) */
+	/** Populated for CopyAsNodes: native clipboard text (T3D), Ctrl+V-able into any graph (§8.5) */
 	FString ClipboardText;
 	/** Only meaningful for InsertIntoGraph */
 	TArray<UEdGraphNode*> CreatedNodes;
@@ -53,10 +54,12 @@ struct FN2CImportResult
  * @class FN2CGraphImporter
  * @brief Resolves, creates, wires and validates the nodes described by an N2C Graph v2 document
  *
- * A self-contained new code path (docs §8.1) - it never touches the v1 translator. ValidateOnly
- * builds into a scratch graph outered to the Blueprint (never registered, never saved) and always
- * discards it; InsertIntoGraph builds directly into TargetGraph inside one FScopedTransaction, so a
- * single Ctrl+Z removes the whole import (docs §8.3 step 11, §17).
+ * A self-contained new code path (docs §8.1) - it never touches the v1 translator. ValidateOnly and
+ * CopyAsNodes both build into a scratch graph outered to the Blueprint (never registered in
+ * FunctionGraphs/UbergraphPages, never saved) and cancel the whole transaction afterward, so neither
+ * changes the Blueprint or dirties its package. InsertIntoGraph builds directly into TargetGraph
+ * inside the same kind of transaction and lets it commit, so a single Ctrl+Z removes the whole
+ * import (docs §8.3 step 11, §17).
  */
 class FN2CGraphImporter
 {
@@ -64,18 +67,32 @@ public:
 	/**
 	 * @param JsonText The N2C Graph v2 document
 	 * @param Blueprint The Blueprint declarations are added to and function/variable resolution is scoped to
-	 * @param TargetGraph The graph to import into. Used directly when the document has exactly one
-	 *        graph; for a multi-graph document each graph is matched to an existing Blueprint graph
-	 *        by name instead (docs §8.3 step 2)
+	 * @param TargetGraph The graph to import into (InsertIntoGraph/ValidateOnly), or the graph to
+	 *        resolve local variables/reused nodes against while building in a scratch graph
+	 *        (CopyAsNodes). Used directly when the document has exactly one graph; for a multi-graph
+	 *        document each graph is matched to an existing Blueprint graph by name instead (docs §8.3
+	 *        step 2)
 	 */
 	static FN2CImportResult Import(const FString& JsonText, UBlueprint* Blueprint, UEdGraph* TargetGraph, const FN2CImportOptions& Options);
+
+	/**
+	 * Extract an N2C Graph v2 document from raw pasted/typed text (docs §10.2): strips a ```json ...
+	 * ``` (or bare ``` ... ```) fence if present, then finds the first top-level balanced {...}
+	 * block that contains "format" and "n2c.graph". Falls back to returning the input unchanged if
+	 * no such block is found (e.g. the text is already clean JSON).
+	 */
+	static FString ExtractJsonDocument(const FString& RawText);
 
 private:
 	/** Everything the node/link/default helpers below need, threaded through by reference */
 	struct FImportContext
 	{
 		UBlueprint* Blueprint = nullptr;
+		/** Where nodes are actually created - the real target graph, or a scratch graph (CopyAsNodes) */
 		UEdGraph* Graph = nullptr;
+		/** Where local variables / reused function_entry etc. are looked up - always the real graph,
+		 * even when Graph is a scratch graph (CopyAsNodes) */
+		UEdGraph* ScopeGraph = nullptr;
 		const UEdGraphSchema_K2* Schema = nullptr;
 		FN2CImportReport* Report = nullptr;
 		const FN2CImportOptions* Options = nullptr;
@@ -136,7 +153,7 @@ private:
 	static void LayoutNodes(FImportContext& Ctx, const FN2CGraphDocGraph& DocGraph, const TArray<UEdGraphNode*>& NewlyCreatedNodes);
 	static void CreateComments(FImportContext& Ctx, const FN2CGraphDocGraph& DocGraph);
 
-	// --- scratch graph for ValidateOnly (and, later, P3's Copy as nodes), docs §8.5 ---
+	// --- scratch graph for ValidateOnly and CopyAsNodes, docs §8.5 ---
 	static UEdGraph* CreateScratchGraph(UBlueprint* Blueprint);
 	static void DestroyScratchGraph(UBlueprint* Blueprint, UEdGraph* ScratchGraph, bool bBlueprintWasDirty);
 };

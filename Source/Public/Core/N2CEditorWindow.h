@@ -8,10 +8,13 @@
 #include "LLM/N2CLLMTypes.h"
 #include "Models/N2CTranslation.h"
 #include "Code Editor/Models/N2CCodeLanguage.h"
+#include "Bridge/N2CGraphImporter.h"
 
 class SN2CCodeEditor;
 class SWidgetSwitcher;
 class STextBlock;
+class SMultiLineEditableTextBox;
+class SCheckBox;
 
 class SN2CEditorWindow : public SCompoundWidget
 {
@@ -44,6 +47,9 @@ public:
     /** Close the existing tab so it can be re-spawned in a different tab well */
     static void CloseTab();
 
+    /** Open (or focus) the window and switch it to the Import panel (docs §10.1, §10.2) */
+    static void ShowImportPanel();
+
 private:
     // --- Delegate handlers ---
     void HandleTranslationRequestSent();
@@ -66,11 +72,24 @@ private:
     EN2CCodeLanguage GetTargetLanguage() const;
     FName GetActiveTheme() const;
 
+    // --- Import panel (§10.2) ---
+    FReply OnImportValidateClicked();
+    FReply OnImportInsertClicked();
+    FReply OnImportCopyAsNodesClicked();
+    FReply OnImportCopyReportClicked();
+    FReply OnImportClearClicked();
+    FReply OnImportLoadFileClicked();
+    void RunImport(EN2CImportMode Mode);
+    void RefreshImportTargetLabel();
+    FText GetImportTargetText() const;
+    bool IsImportTargetAvailable() const;
+
     // --- State ---
     int32 CurrentGraphIndex = 0;
     FN2CTranslationResponse CachedResponse;
     FDelegateHandle RequestSentHandle;
     FDelegateHandle ResponseReceivedHandle;
+    FString LastImportReportText;
 
     // --- Widget references ---
     TSharedPtr<SWidgetSwitcher> PanelSwitcher;
@@ -83,6 +102,12 @@ private:
     TSharedPtr<SWidget> ToolbarWidget;
     TSharedPtr<SComboBox<TSharedPtr<FString>>> GraphSelector;
     TArray<TSharedPtr<FString>> GraphNameOptions;
+
+    TSharedPtr<STextBlock> ImportTargetLabel;
+    TSharedPtr<SMultiLineEditableTextBox> ImportJsonTextBox;
+    TSharedPtr<SMultiLineEditableTextBox> ImportReportTextBox;
+    TSharedPtr<SCheckBox> ImportCreateDeclarationsCheckBox;
+    TSharedPtr<SCheckBox> ImportCompileAfterCheckBox;
 
     /** The currently active tab */
     static TWeakPtr<SDockTab> ActiveTab;

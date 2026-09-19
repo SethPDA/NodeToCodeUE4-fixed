@@ -33,7 +33,20 @@ public:
     /** Get the default theme for a language */
     FName GetDefaultTheme(EN2CCodeLanguage Language) const;
 
+    /**
+     * The most recently active Blueprint editor (docs §10.3). The Import panel reads the focused
+     * graph from this when a button is pressed, rather than tracking focus itself, since the N2C
+     * window is a separate tab from the Blueprint editor.
+     */
+    TSharedPtr<FBlueprintEditor> GetLastActiveBlueprintEditor() const { return LastActiveBlueprintEditor.Pin(); }
+
+    /** Update the last-active Blueprint editor. Called on asset-open and on every N2C command. */
+    void SetLastActiveBlueprintEditor(TWeakPtr<FBlueprintEditor> InEditor) { LastActiveBlueprintEditor = InEditor; }
+
 private:
+    /** See GetLastActiveBlueprintEditor() */
+    TWeakPtr<FBlueprintEditor> LastActiveBlueprintEditor;
+
     /** Constructor */
     FN2CEditorIntegration() = default;
 
@@ -65,6 +78,9 @@ private:
 
     /** Save a node catalog JSON file for the AI to reference (docs §9.3) */
     void ExecuteExportNodeCatalogForEditor(TWeakPtr<FBlueprintEditor> InEditor);
+
+    /** Open the N2C window on the Import panel, targeting this editor (docs §10.1, §10.2) */
+    void ExecuteImportGraphJsonForEditor(TWeakPtr<FBlueprintEditor> InEditor);
 
     /** Handle asset editor opened callback */
     void HandleAssetEditorOpened(UObject* Asset, IAssetEditorInstance* EditorInstance);

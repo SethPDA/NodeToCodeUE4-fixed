@@ -18,9 +18,18 @@
 #include "Widgets/Images/SThrobber.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "EditorStyleSet.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
+
+#include "Bridge/N2CGraphImporter.h"
+#include "BlueprintEditor.h"
+#include "BlueprintEditorModule.h"
+#include "DesktopPlatformModule.h"
+#include "IDesktopPlatform.h"
+#include "Misc/FileHelper.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/WindowsPlatformApplicationMisc.h"
@@ -204,6 +213,23 @@ void SN2CEditorWindow::Construct(const FArguments& InArgs)
                     .ToolTipText(LOCTEXT("OpenFolderTip", "Open the saved translation files in your file explorer"))
                     .OnClicked(this, &SN2CEditorWindow::OnOpenExplorerClicked)
                 ]
+
+                // Import button (§10.2)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(2.f, 0.f)
+                [
+                    SNew(SButton)
+                    .Text(LOCTEXT("ImportTab", "Import"))
+                    .ToolTipText(LOCTEXT("ImportTabTip", "Paste an N2C Graph v2 document to validate, insert, or copy as pasteable nodes"))
+                    .OnClicked_Lambda([this]() -> FReply
+                    {
+                        RefreshImportTargetLabel();
+                        SetActivePanel(4);
+                        return FReply::Handled();
+                    })
+                ]
             ]
         ]
 
@@ -378,6 +404,131 @@ void SN2CEditorWindow::Construct(const FArguments& InArgs)
                         .AutoWrapText(true)
                         .Justification(ETextJustify::Center)
                     ]
+                ]
+            ]
+
+            // [4] Import panel (§10.2) - paste an N2C Graph v2 document, validate/insert/copy as nodes
+            + SWidgetSwitcher::Slot()
+            [
+                SNew(SVerticalBox)
+
+                // Target row
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(6.f, 6.f, 6.f, 2.f)
+                [
+                    SNew(SHorizontalBox)
+
+                    + SHorizontalBox::Slot()
+                    .FillWidth(1.f)
+                    .VAlign(VAlign_Center)
+                    [
+                        SAssignNew(ImportTargetLabel, STextBlock)
+                        .Text(this, &SN2CEditorWindow::GetImportTargetText)
+                    ]
+
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    .Padding(4.f, 0.f, 0.f, 0.f)
+                    [
+                        SNew(SButton)
+                        .Text(LOCTEXT("ImportLoadFile", "Load file..."))
+                        .OnClicked(this, &SN2CEditorWindow::OnImportLoadFileClicked)
+                    ]
+                ]
+
+                // JSON input box
+                + SVerticalBox::Slot()
+                .FillHeight(0.6f)
+                .Padding(6.f, 2.f)
+                [
+                    SAssignNew(ImportJsonTextBox, SMultiLineEditableTextBox)
+                    .HintText(LOCTEXT("ImportJsonHint", "Paste an N2C Graph v2 document here (a ```json fence or surrounding prose is fine - it's extracted automatically)"))
+                    .Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+                    .AllowMultiLine(true)
+                    .AutoWrapText(false)
+                ]
+
+                // Buttons row
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(6.f, 2.f)
+                [
+                    SNew(SHorizontalBox)
+
+                    + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+                    [
+                        SNew(SButton)
+                        .Text(LOCTEXT("ImportValidate", "Validate"))
+                        .ToolTipText(LOCTEXT("ImportValidateTip", "Check the document against the focused Blueprint without changing anything"))
+                        .OnClicked(this, &SN2CEditorWindow::OnImportValidateClicked)
+                    ]
+                    + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+                    [
+                        SNew(SButton)
+                        .Text(LOCTEXT("ImportInsert", "Insert into graph"))
+                        .ToolTipText(LOCTEXT("ImportInsertTip", "Create the nodes in the focused graph (one undo step)"))
+                        .OnClicked(this, &SN2CEditorWindow::OnImportInsertClicked)
+                    ]
+                    + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+                    [
+                        SNew(SButton)
+                        .Text(LOCTEXT("ImportCopyAsNodes", "Copy as nodes"))
+                        .ToolTipText(LOCTEXT("ImportCopyAsNodesTip", "Copy the nodes to the clipboard - Ctrl+V into any graph of the same Blueprint"))
+                        .OnClicked(this, &SN2CEditorWindow::OnImportCopyAsNodesClicked)
+                    ]
+                    + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+                    [
+                        SNew(SButton)
+                        .Text(LOCTEXT("ImportCopyReport", "Copy report"))
+                        .ToolTipText(LOCTEXT("ImportCopyReportTip", "Copy the report below, to paste back to the AI"))
+                        .OnClicked(this, &SN2CEditorWindow::OnImportCopyReportClicked)
+                    ]
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [
+                        SNew(SButton)
+                        .Text(LOCTEXT("ImportClear", "Clear"))
+                        .OnClicked(this, &SN2CEditorWindow::OnImportClearClicked)
+                    ]
+                ]
+
+                // Options row
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(6.f, 2.f)
+                [
+                    SNew(SHorizontalBox)
+
+                    + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 12.f, 0.f)
+                    [
+                        SAssignNew(ImportCreateDeclarationsCheckBox, SCheckBox)
+                        .IsChecked(ECheckBoxState::Checked)
+                        .Content()
+                        [
+                            SNew(STextBlock).Text(LOCTEXT("ImportCreateDeclarations", "Create missing declarations"))
+                        ]
+                    ]
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [
+                        SAssignNew(ImportCompileAfterCheckBox, SCheckBox)
+                        .IsChecked(ECheckBoxState::Checked)
+                        .Content()
+                        [
+                            SNew(STextBlock).Text(LOCTEXT("ImportCompileAfter", "Compile after insert"))
+                        ]
+                    ]
+                ]
+
+                // Report view
+                + SVerticalBox::Slot()
+                .FillHeight(0.4f)
+                .Padding(6.f, 2.f, 6.f, 6.f)
+                [
+                    SAssignNew(ImportReportTextBox, SMultiLineEditableTextBox)
+                    .IsReadOnly(true)
+                    .Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+                    .HintText(LOCTEXT("ImportReportHint", "The validation/insert report will appear here."))
                 ]
             ]
         ]
@@ -635,6 +786,204 @@ EN2CCodeLanguage SN2CEditorWindow::GetTargetLanguage() const
 FName SN2CEditorWindow::GetActiveTheme() const
 {
     return FN2CEditorIntegration::Get().GetDefaultTheme(GetTargetLanguage());
+}
+
+// ─────────────────────────────────────────────
+// Import panel (§10.2)
+// ─────────────────────────────────────────────
+
+void SN2CEditorWindow::ShowImportPanel()
+{
+    TSharedPtr<SDockTab> Tab = FGlobalTabmanager::Get()->TryInvokeTab(TabId);
+    if (!Tab.IsValid())
+    {
+        return;
+    }
+    TSharedRef<SN2CEditorWindow> Window = StaticCastSharedRef<SN2CEditorWindow>(Tab->GetContent());
+    Window->RefreshImportTargetLabel();
+    Window->SetActivePanel(4);
+}
+
+bool SN2CEditorWindow::IsImportTargetAvailable() const
+{
+    TSharedPtr<FBlueprintEditor> Editor = FN2CEditorIntegration::Get().GetLastActiveBlueprintEditor();
+    return Editor.IsValid() && Editor->GetFocusedGraph() != nullptr;
+}
+
+FText SN2CEditorWindow::GetImportTargetText() const
+{
+    TSharedPtr<FBlueprintEditor> Editor = FN2CEditorIntegration::Get().GetLastActiveBlueprintEditor();
+    if (!Editor.IsValid())
+    {
+        return LOCTEXT("ImportNoTarget", "Target: no Blueprint editor open. Open one, then click Import again.");
+    }
+    UBlueprint* Blueprint = Editor->GetBlueprintObj();
+    UEdGraph* FocusedGraph = Editor->GetFocusedGraph();
+    if (!Blueprint || !FocusedGraph)
+    {
+        return LOCTEXT("ImportNoFocusedGraph", "Target: no focused graph in the Blueprint editor.");
+    }
+    return FText::Format(LOCTEXT("ImportTargetFmt", "Target: {0} ▸ {1}"),
+        FText::FromString(Blueprint->GetName()), FText::FromString(FocusedGraph->GetName()));
+}
+
+void SN2CEditorWindow::RefreshImportTargetLabel()
+{
+    if (ImportTargetLabel.IsValid())
+    {
+        ImportTargetLabel->SetText(GetImportTargetText());
+    }
+}
+
+void SN2CEditorWindow::RunImport(EN2CImportMode Mode)
+{
+    if (!ImportJsonTextBox.IsValid() || !ImportReportTextBox.IsValid())
+    {
+        return;
+    }
+
+    TSharedPtr<FBlueprintEditor> Editor = FN2CEditorIntegration::Get().GetLastActiveBlueprintEditor();
+    if (!Editor.IsValid())
+    {
+        ImportReportTextBox->SetText(LOCTEXT("ImportRunNoEditor", "No active Blueprint editor. Open the Blueprint you want to import into, click inside its graph, then try again."));
+        return;
+    }
+    UBlueprint* Blueprint = Editor->GetBlueprintObj();
+    UEdGraph* FocusedGraph = Editor->GetFocusedGraph();
+    if (!Blueprint || !FocusedGraph)
+    {
+        ImportReportTextBox->SetText(LOCTEXT("ImportRunNoGraph", "The target Blueprint editor has no focused graph. Click inside a graph tab, then try again."));
+        return;
+    }
+
+    const FString RawText = ImportJsonTextBox->GetText().ToString();
+    const FString TrimmedText = RawText.TrimStartAndEnd();
+
+    // Accepted input per §10.2: a packed BPC1 string or native T3D text need no importer at all
+    if (TrimmedText.StartsWith(TEXT("BPC1")))
+    {
+        ImportReportTextBox->SetText(LOCTEXT("ImportBPC1Hint",
+            "This looks like a packed BPC1 string, not N2C Graph v2 JSON. Unpack it with the workflow-bp skill's bpcodec.py, then paste the unpacked text directly into the graph with Ctrl+V - no importer needed."));
+        return;
+    }
+    if (TrimmedText.StartsWith(TEXT("Begin Object")))
+    {
+        FPlatformApplicationMisc::ClipboardCopy(*TrimmedText);
+        // PasteNodesHere is public on the IBlueprintEditor interface but overridden as protected on
+        // FBlueprintEditor itself, so it must be called through the interface pointer (§10.2)
+        static_cast<IBlueprintEditor*>(Editor.Get())->PasteNodesHere(FocusedGraph, FVector2D::ZeroVector);
+        ImportReportTextBox->SetText(LOCTEXT("ImportPastedAsNodes",
+            "This looks like native Blueprint clipboard text (T3D), so it was pasted directly into the focused graph - no importer needed."));
+        return;
+    }
+
+    const FString JsonText = FN2CGraphImporter::ExtractJsonDocument(RawText);
+
+    FN2CImportOptions Options;
+    Options.Mode = Mode;
+    Options.bCreateDeclarations = !ImportCreateDeclarationsCheckBox.IsValid() || ImportCreateDeclarationsCheckBox->IsChecked();
+    Options.bCompileAfter = !ImportCompileAfterCheckBox.IsValid() || ImportCompileAfterCheckBox->IsChecked();
+
+    const FN2CImportResult Result = FN2CGraphImporter::Import(JsonText, Blueprint, FocusedGraph, Options);
+
+    LastImportReportText = Result.Report.ToText();
+    ImportReportTextBox->SetText(FText::FromString(LastImportReportText));
+
+    if (Mode == EN2CImportMode::CopyAsNodes)
+    {
+        if (Result.bSuccess && !Result.ClipboardText.IsEmpty())
+        {
+            FPlatformApplicationMisc::ClipboardCopy(*Result.ClipboardText);
+
+            FNotificationInfo Info(LOCTEXT("ImportCopiedAsNodes", "Nodes copied to clipboard - Ctrl+V into any graph of the same Blueprint"));
+            Info.bFireAndForget = true;
+            Info.ExpireDuration = 2.5f;
+            FSlateNotificationManager::Get().AddNotification(Info);
+        }
+    }
+    else if (Mode == EN2CImportMode::InsertIntoGraph && Result.bSuccess)
+    {
+        FNotificationInfo Info(FText::Format(LOCTEXT("ImportInserted", "Inserted {0} node(s) - Ctrl+Z undoes the whole import"), Result.CreatedNodes.Num()));
+        Info.bFireAndForget = true;
+        Info.ExpireDuration = 2.5f;
+        FSlateNotificationManager::Get().AddNotification(Info);
+    }
+}
+
+FReply SN2CEditorWindow::OnImportValidateClicked()
+{
+    RunImport(EN2CImportMode::ValidateOnly);
+    return FReply::Handled();
+}
+
+FReply SN2CEditorWindow::OnImportInsertClicked()
+{
+    RunImport(EN2CImportMode::InsertIntoGraph);
+    return FReply::Handled();
+}
+
+FReply SN2CEditorWindow::OnImportCopyAsNodesClicked()
+{
+    RunImport(EN2CImportMode::CopyAsNodes);
+    return FReply::Handled();
+}
+
+FReply SN2CEditorWindow::OnImportCopyReportClicked()
+{
+    if (!LastImportReportText.IsEmpty())
+    {
+        FPlatformApplicationMisc::ClipboardCopy(*LastImportReportText);
+
+        FNotificationInfo Info(LOCTEXT("ImportReportCopied", "Report copied to clipboard"));
+        Info.bFireAndForget = true;
+        Info.ExpireDuration = 2.0f;
+        FSlateNotificationManager::Get().AddNotification(Info);
+    }
+    return FReply::Handled();
+}
+
+FReply SN2CEditorWindow::OnImportClearClicked()
+{
+    if (ImportJsonTextBox.IsValid())
+    {
+        ImportJsonTextBox->SetText(FText::GetEmpty());
+    }
+    if (ImportReportTextBox.IsValid())
+    {
+        ImportReportTextBox->SetText(FText::GetEmpty());
+    }
+    LastImportReportText.Empty();
+    return FReply::Handled();
+}
+
+FReply SN2CEditorWindow::OnImportLoadFileClicked()
+{
+    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+    if (!DesktopPlatform)
+    {
+        return FReply::Handled();
+    }
+
+    TArray<FString> OutFilenames;
+    const bool bOpened = DesktopPlatform->OpenFileDialog(
+        nullptr,
+        TEXT("Load N2C Graph JSON"),
+        FPaths::ProjectSavedDir(),
+        TEXT(""),
+        TEXT("JSON Files (*.json)|*.json|Text Files (*.txt)|*.txt|All Files (*.*)|*.*"),
+        EFileDialogFlags::None,
+        OutFilenames
+    );
+
+    if (bOpened && OutFilenames.Num() > 0)
+    {
+        FString FileText;
+        if (FFileHelper::LoadFileToString(FileText, *OutFilenames[0]) && ImportJsonTextBox.IsValid())
+        {
+            ImportJsonTextBox->SetText(FText::FromString(FileText));
+        }
+    }
+    return FReply::Handled();
 }
 
 #undef LOCTEXT_NAMESPACE

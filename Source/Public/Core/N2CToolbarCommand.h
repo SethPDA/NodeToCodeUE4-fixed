@@ -22,6 +22,7 @@ public:
     TSharedPtr<FUICommandInfo> CopyGraphJsonV2Command;
     TSharedPtr<FUICommandInfo> CopyBlueprintSummaryCommand;
     TSharedPtr<FUICommandInfo> ExportNodeCatalogCommand;
+    TSharedPtr<FUICommandInfo> ImportGraphJsonCommand;
 
     // Command names and labels
     static const FName CommandName_Open;

@@ -284,6 +284,20 @@ void FN2CEditorIntegration::ExecuteExportNodeCatalogForEditor(TWeakPtr<FBlueprin
     }
 }
 
+void FN2CEditorIntegration::ExecuteImportGraphJsonForEditor(TWeakPtr<FBlueprintEditor> InEditor)
+{
+    FN2CLogger::Get().Log(TEXT("ExecuteImportGraphJsonForEditor called"), EN2CLogSeverity::Debug);
+
+    TSharedPtr<FBlueprintEditor> Editor = InEditor.Pin();
+    if (!Editor.IsValid())
+    {
+        FN2CLogger::Get().LogError(TEXT("Invalid Blueprint Editor pointer"));
+        return;
+    }
+
+    SN2CEditorWindow::ShowImportPanel();
+}
+
 void FN2CEditorIntegration::Initialize()
 {
     // Register commands
@@ -362,6 +376,7 @@ void FN2CEditorIntegration::HandleAssetEditorOpened(UObject* Asset, IAssetEditor
     {
         // Check if we already have this editor registered
         TWeakPtr<FBlueprintEditor> WeakEditor(BlueprintEditorShared);
+        LastActiveBlueprintEditor = WeakEditor;
         if (!EditorCommandLists.Contains(WeakEditor))
         {
             FString BlueprintPath = OpenedBlueprint->GetPathName();
@@ -424,8 +439,9 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
     // Map the Open Window command
     CommandList->MapAction(
         FN2CToolbarCommand::Get().OpenWindowCommand,
-        FExecuteAction::CreateLambda([this]()
+        FExecuteAction::CreateLambda([this, WeakEditor]()
         {
+            LastActiveBlueprintEditor = WeakEditor;
             FGlobalTabmanager::Get()->TryInvokeTab(SN2CEditorWindow::TabId);
             FN2CLogger::Get().Log(TEXT("Node to Code window opened"), EN2CLogSeverity::Info);
         }),
@@ -437,6 +453,7 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
         FN2CToolbarCommand::Get().CollectNodesCommand,
         FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
         {
+            LastActiveBlueprintEditor = WeakEditor;
             FN2CLogger::Get().Log(
                 FString::Printf(TEXT("Node to Code collection triggered for Blueprint: %s"), *BlueprintName),
                 EN2CLogSeverity::Info
@@ -459,6 +476,7 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
         FN2CToolbarCommand::Get().CopyJsonCommand,
         FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
         {
+            LastActiveBlueprintEditor = WeakEditor;
             FN2CLogger::Get().Log(
                 FString::Printf(TEXT("Copy Blueprint JSON triggered for Blueprint: %s"), *BlueprintName),
                 EN2CLogSeverity::Info
@@ -481,6 +499,7 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
         FN2CToolbarCommand::Get().CopyGraphJsonV2Command,
         FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
         {
+            LastActiveBlueprintEditor = WeakEditor;
             FN2CLogger::Get().Log(
                 FString::Printf(TEXT("Copy Graph JSON (v2) triggered for Blueprint: %s"), *BlueprintName),
                 EN2CLogSeverity::Info
@@ -503,6 +522,7 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
         FN2CToolbarCommand::Get().CopyBlueprintSummaryCommand,
         FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
         {
+            LastActiveBlueprintEditor = WeakEditor;
             FN2CLogger::Get().Log(
                 FString::Printf(TEXT("Copy Blueprint Summary triggered for Blueprint: %s"), *BlueprintName),
                 EN2CLogSeverity::Info
@@ -525,6 +545,7 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
         FN2CToolbarCommand::Get().ExportNodeCatalogCommand,
         FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
         {
+            LastActiveBlueprintEditor = WeakEditor;
             FN2CLogger::Get().Log(
                 FString::Printf(TEXT("Export Node Catalog triggered from Blueprint: %s"), *BlueprintName),
                 EN2CLogSeverity::Info
@@ -532,6 +553,29 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
             ExecuteExportNodeCatalogForEditor(WeakEditor);
         }),
         FCanExecuteAction::CreateLambda([]() { return true; })
+    );
+
+    // Map the Import Graph JSON command
+    CommandList->MapAction(
+        FN2CToolbarCommand::Get().ImportGraphJsonCommand,
+        FExecuteAction::CreateLambda([this, WeakEditor, BlueprintName]()
+        {
+            LastActiveBlueprintEditor = WeakEditor;
+            FN2CLogger::Get().Log(
+                FString::Printf(TEXT("Import Graph JSON triggered from Blueprint: %s"), *BlueprintName),
+                EN2CLogSeverity::Info
+            );
+            ExecuteImportGraphJsonForEditor(WeakEditor);
+        }),
+        FCanExecuteAction::CreateLambda([WeakEditor]()
+        {
+            TSharedPtr<FBlueprintEditor> Editor = WeakEditor.Pin();
+            if (!Editor.IsValid())
+            {
+                return false;
+            }
+            return Editor->GetCurrentMode() == FBlueprintEditorApplicationModes::StandardBlueprintEditorMode;
+        })
     );
 
     // Store in our map
@@ -579,6 +623,7 @@ void FN2CEditorIntegration::RegisterToolbarForEditor(TSharedPtr<FBlueprintEditor
                     MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().CopyGraphJsonV2Command);
                     MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().CopyBlueprintSummaryCommand);
                     MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().ExportNodeCatalogCommand);
+                    MenuBuilder.AddMenuEntry(FN2CToolbarCommand::Get().ImportGraphJsonCommand);
                     return MenuBuilder.MakeWidget();
                 }),
                 FText::GetEmpty(),

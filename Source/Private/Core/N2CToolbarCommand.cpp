@@ -80,6 +80,14 @@ void FN2CToolbarCommand::RegisterCommands()
         FInputChord()
     );
 
+    UI_COMMAND(
+        ImportGraphJsonCommand,
+        "Import Graph JSON...",
+        "Open the Node to Code window's Import panel, targeting this Blueprint editor",
+        EUserInterfaceActionType::Button,
+        FInputChord()
+    );
+
     FN2CLogger::Get().Log(TEXT("N2C toolbar commands registered"), EN2CLogSeverity::Debug);
 }
 

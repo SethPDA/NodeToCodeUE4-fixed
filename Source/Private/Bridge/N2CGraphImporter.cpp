@@ -668,8 +668,11 @@ UEdGraphNode* FN2CGraphImporter::CreateVariableNode(FImportContext& Ctx, const F
 
 	if (Scope == TEXT("local") || Scope == TEXT("param"))
 	{
-		// Function parameters are stored the same way as local variables once compiled (§8.3 step 5)
-		FBPVariableDescription* LocalVar = FBlueprintEditorUtils::FindLocalVariable(Ctx.Blueprint, Ctx.Graph, VarFName);
+		// Function parameters are stored the same way as local variables once compiled (§8.3 step 5).
+		// Resolved against ScopeGraph (the real function graph), not Graph, which may be a scratch
+		// graph in CopyAsNodes mode - the local variable itself only exists on the real graph.
+		UEdGraph* ScopeGraph = Ctx.ScopeGraph ? Ctx.ScopeGraph : Ctx.Graph;
+		FBPVariableDescription* LocalVar = FBlueprintEditorUtils::FindLocalVariable(Ctx.Blueprint, ScopeGraph, VarFName);
 		if (!LocalVar)
 		{
 			Ctx.Report->AddError(TEXT("node"), DocNode.Id, FString::Printf(TEXT("%s '%s' not found in this function"), *Scope, *VarName));
@@ -679,7 +682,7 @@ UEdGraphNode* FN2CGraphImporter::CreateVariableNode(FImportContext& Ctx, const F
 		{
 			FGraphNodeCreator<UK2Node_VariableSet> Creator(*Ctx.Graph);
 			UK2Node_VariableSet* Node = Creator.CreateNode();
-			Node->VariableReference.SetLocalMember(VarFName, Ctx.Graph->GetName(), LocalVar->VarGuid);
+			Node->VariableReference.SetLocalMember(VarFName, ScopeGraph->GetName(), LocalVar->VarGuid);
 			Creator.Finalize();
 			VarNode = Node;
 		}
@@ -687,7 +690,7 @@ UEdGraphNode* FN2CGraphImporter::CreateVariableNode(FImportContext& Ctx, const F
 		{
 			FGraphNodeCreator<UK2Node_VariableGet> Creator(*Ctx.Graph);
 			UK2Node_VariableGet* Node = Creator.CreateNode();
-			Node->VariableReference.SetLocalMember(VarFName, Ctx.Graph->GetName(), LocalVar->VarGuid);
+			Node->VariableReference.SetLocalMember(VarFName, ScopeGraph->GetName(), LocalVar->VarGuid);
 			Creator.Finalize();
 			VarNode = Node;
 		}
@@ -1679,6 +1682,14 @@ void FN2CGraphImporter::ImportGraph(FImportContext& Ctx, const FN2CGraphDocGraph
 	{
 		if (DocNode.Kind == TEXT("local_variables"))
 		{
+			if (Ctx.Options->Mode == EN2CImportMode::CopyAsNodes)
+			{
+				// Local variables are a declaration-like, persistent addition to the function;
+				// Copy mode never creates declarations (§8.5)
+				Ctx.Report->AddWarning(TEXT("declaration"), DocNode.Id, TEXT("Copy as nodes does not create local variables; declare them in the editor first if any node below references one"));
+				continue;
+			}
+
 			UK2Node_FunctionEntry* EntryNode = nullptr;
 			for (UEdGraphNode* Node : Ctx.Graph->Nodes)
 			{
@@ -1768,6 +1779,84 @@ void FN2CGraphImporter::ImportGraph(FImportContext& Ctx, const FN2CGraphDocGraph
 }
 
 // ============================================================================
+// Input extraction (docs §10.2)
+// ============================================================================
+
+FString FN2CGraphImporter::ExtractJsonDocument(const FString& RawText)
+{
+	FString Text = RawText;
+
+	// Strip a ```json ... ``` (or bare ``` ... ```) fence if present
+	const int32 FenceStart = Text.Find(TEXT("```"));
+	if (FenceStart != INDEX_NONE)
+	{
+		int32 ContentStart = FenceStart + 3;
+		const int32 NewlineAfterFence = Text.Find(TEXT("\n"), ESearchCase::IgnoreCase, ESearchDir::FromStart, ContentStart);
+		if (NewlineAfterFence != INDEX_NONE && NewlineAfterFence - ContentStart < 20)
+		{
+			// Skip an optional language tag on the fence's own line (e.g. "json")
+			ContentStart = NewlineAfterFence + 1;
+		}
+		const int32 FenceEnd = Text.Find(TEXT("```"), ESearchCase::IgnoreCase, ESearchDir::FromStart, ContentStart);
+		if (FenceEnd != INDEX_NONE)
+		{
+			Text = Text.Mid(ContentStart, FenceEnd - ContentStart);
+		}
+	}
+
+	// Find the first top-level balanced {...} block that contains "format" and "n2c.graph",
+	// tracking string literals so braces inside JSON string values don't confuse the depth count
+	for (int32 i = 0; i < Text.Len(); ++i)
+	{
+		if (Text[i] != TEXT('{'))
+		{
+			continue;
+		}
+
+		int32 Depth = 0;
+		bool bInString = false;
+		bool bEscaped = false;
+		for (int32 j = i; j < Text.Len(); ++j)
+		{
+			const TCHAR C = Text[j];
+			if (bInString)
+			{
+				if (bEscaped) { bEscaped = false; }
+				else if (C == TEXT('\\')) { bEscaped = true; }
+				else if (C == TEXT('"')) { bInString = false; }
+				continue;
+			}
+			if (C == TEXT('"'))
+			{
+				bInString = true;
+				continue;
+			}
+			if (C == TEXT('{'))
+			{
+				++Depth;
+			}
+			else if (C == TEXT('}'))
+			{
+				--Depth;
+				if (Depth == 0)
+				{
+					const FString Candidate = Text.Mid(i, j - i + 1);
+					if (Candidate.Contains(TEXT("\"format\"")) && Candidate.Contains(TEXT("n2c.graph")))
+					{
+						return Candidate;
+					}
+					break; // this brace block wasn't it; keep scanning from the next '{'
+				}
+			}
+		}
+	}
+
+	// No fenced/embedded block found - return as-is (already-clean JSON, or it will fail to parse
+	// and the caller's report will say so)
+	return Text;
+}
+
+// ============================================================================
 // Entry point
 // ============================================================================
 
@@ -1778,11 +1867,6 @@ FN2CImportResult FN2CGraphImporter::Import(const FString& JsonText, UBlueprint* 
 	if (!Blueprint)
 	{
 		Result.Report.AddError(TEXT("structure"), TEXT("<document>"), TEXT("no target Blueprint given"));
-		return Result;
-	}
-	if (Options.Mode == EN2CImportMode::CopyAsNodes)
-	{
-		Result.Report.AddError(TEXT("structure"), TEXT("<document>"), TEXT("Copy as nodes is not implemented until P3 (docs §8.5)"));
 		return Result;
 	}
 
@@ -1805,31 +1889,60 @@ FN2CImportResult FN2CGraphImporter::Import(const FString& JsonText, UBlueprint* 
 		Result.Report.AddWarning(TEXT("structure"), TEXT("<document>"), Issue);
 	}
 
-	Result.Report.ModeDescription = (Options.Mode == EN2CImportMode::ValidateOnly) ? TEXT("Validate") : TEXT("Insert");
+	const bool bCopyMode = (Options.Mode == EN2CImportMode::CopyAsNodes);
+	const bool bValidateOnly = (Options.Mode == EN2CImportMode::ValidateOnly);
+
+	Result.Report.ModeDescription = bCopyMode ? TEXT("Copy as nodes") : (bValidateOnly ? TEXT("Validate") : TEXT("Insert"));
 	Result.Report.TargetDescription = FString::Printf(TEXT("%s / %s"), *Blueprint->GetName(),
 		(Document.Graphs.Num() == 1 && TargetGraph) ? *TargetGraph->GetName() : TEXT("(matched by name)"));
 
-	// One transaction for the whole import, so a single Ctrl+Z removes it entirely (§8.3 step 3,
-	// §17). ValidateOnly cancels it at the end instead of letting it commit, so nothing is left
-	// behind - including any function graphs newly created by "declarations" (§8.3 step 11).
-	FScopedTransaction Transaction(NSLOCTEXT("NodeToCode", "N2CImport", "Import N2C Graph"));
+	const int32 DeclarationCount = Document.Declarations.Variables.Num() + Document.Declarations.Functions.Num() +
+		Document.Declarations.CustomEvents.Num() + Document.Declarations.Dispatchers.Num();
+	if (bCopyMode && DeclarationCount > 0)
+	{
+		Result.Report.AddWarning(TEXT("declaration"), TEXT("<document>"),
+			TEXT("Copy as nodes never creates declarations (§8.5); a node referencing a newly declared member will fail to resolve below. Use Insert into graph instead, or declare these members in the editor first."));
+	}
+
+	// Captured so ValidateOnly/CopyAsNodes can restore it exactly - Modify() dirties the package
+	// immediately and that isn't undone by cancelling the transaction (dirty-flag tracking is
+	// separate from the undo system).
+	const bool bBlueprintWasDirty = Blueprint->GetOutermost()->IsDirty();
+
+	// One transaction for the whole import, so a single Ctrl+Z removes it entirely when it commits
+	// (§8.3 step 3, §17). A TUniquePtr so ValidateOnly can end it early (see below) rather than
+	// waiting for this function to return.
+	//
+	// IMPORTANT: FScopedTransaction::Cancel() does NOT revert already-applied mutations - it only
+	// discards the transaction's entry from the undo history (verified against engine source,
+	// UTransBuffer::Cancel() in EditorTransaction.cpp: it pops the recorded transaction but never
+	// calls Apply(Undo) on it). It is only safe to use for CopyAsNodes below, which never mutates
+	// the real Blueprint/graph in the first place (everything happens in a throwaway scratch graph).
+	// ValidateOnly does mutate the real Blueprint (declarations, nodes), so making "nothing changes"
+	// true requires a real Undo, not Cancel() - see the ValidateOnly branch below.
+	TUniquePtr<FScopedTransaction> Transaction = MakeUnique<FScopedTransaction>(NSLOCTEXT("NodeToCode", "N2CImport", "Import N2C Graph"));
 	Blueprint->Modify();
 
-	if (Options.bCreateDeclarations)
+	// CopyAsNodes builds into a scratch graph outered to the Blueprint (so self members/functions
+	// still resolve) rather than the real target graph (§8.5)
+	UEdGraph* ScratchGraph = bCopyMode ? CreateScratchGraph(Blueprint) : nullptr;
+
+	if (Options.bCreateDeclarations && !bCopyMode)
 	{
 		CreateDeclarations(Blueprint, Document.Declarations, Result.Report);
 
 		// Compile just the skeleton so newly declared members resolve when creating nodes that
 		// reference them below - the cheapest option that works (§8.3 step 4). This happens inside
-		// the same transaction; if ValidateOnly cancels it, a later real compile (triggered by
-		// anything else touching the Blueprint) regenerates the class fresh from the reverted state.
+		// the same transaction; if the transaction is later cancelled, a later real compile
+		// (triggered by anything else touching the Blueprint) regenerates the class fresh from the
+		// reverted state.
 		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipGarbageCollection);
 	}
 
 	for (const FN2CGraphDocGraph& DocGraph : Document.Graphs)
 	{
-		UEdGraph* GraphForThisEntry = (Document.Graphs.Num() == 1) ? TargetGraph : nullptr;
-		if (!GraphForThisEntry)
+		UEdGraph* GraphForThisEntry = bCopyMode ? ScratchGraph : ((Document.Graphs.Num() == 1) ? TargetGraph : nullptr);
+		if (!bCopyMode && !GraphForThisEntry)
 		{
 			for (UEdGraph* Candidate : Blueprint->FunctionGraphs)
 			{
@@ -1858,11 +1971,15 @@ FN2CImportResult FN2CGraphImporter::Import(const FString& JsonText, UBlueprint* 
 			continue;
 		}
 
-		GraphForThisEntry->Modify();
+		if (!bCopyMode)
+		{
+			GraphForThisEntry->Modify();
+		}
 
 		FImportContext Ctx;
 		Ctx.Blueprint = Blueprint;
 		Ctx.Graph = GraphForThisEntry;
+		Ctx.ScopeGraph = bCopyMode ? (TargetGraph ? TargetGraph : GraphForThisEntry) : GraphForThisEntry;
 		Ctx.Schema = CastChecked<UEdGraphSchema_K2>(GraphForThisEntry->GetSchema());
 		Ctx.Report = &Result.Report;
 		Ctx.Options = &Options;
@@ -1875,7 +1992,10 @@ FN2CImportResult FN2CGraphImporter::Import(const FString& JsonText, UBlueprint* 
 		}
 	}
 
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	if (!bCopyMode)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
 
 	if (Options.Mode == EN2CImportMode::InsertIntoGraph && Options.bCompileAfter)
 	{
@@ -1892,14 +2012,43 @@ FN2CImportResult FN2CGraphImporter::Import(const FString& JsonText, UBlueprint* 
 		}
 	}
 
-	if (Options.Mode == EN2CImportMode::ValidateOnly)
+	if (bCopyMode)
 	{
-		Transaction.Cancel();
-		Result.CreatedNodes.Empty(); // nothing actually exists once the transaction is cancelled
+		// Only export clean results - a report with errors means some referenced nodes don't exist,
+		// and the resulting clipboard text would be missing links to them
+		if (!Result.Report.HasErrors() && Result.CreatedNodes.Num() > 0)
+		{
+			TSet<UObject*> NodeSet;
+			for (UEdGraphNode* Node : Result.CreatedNodes)
+			{
+				NodeSet.Add(Node);
+			}
+			FEdGraphUtilities::ExportNodesToText(NodeSet, Result.ClipboardText);
+		}
+		DestroyScratchGraph(Blueprint, ScratchGraph, bBlueprintWasDirty);
+		Transaction->Cancel(); // safe here: nothing outside the (now-destroyed) scratch graph was touched
+		Result.CreatedNodes.Empty(); // the scratch graph (and everything in it) no longer exists
+	}
+	else if (bValidateOnly)
+	{
+		// Let the transaction commit for real, then immediately undo it through the real editor
+		// undo system, which - unlike Cancel() - actually reverts every mutation: new nodes, new
+		// declarations, the interim skeleton compile, all of it (§8.3 step 11: "nothing changes").
+		Transaction.Reset(); // destructor runs GEditor->EndTransaction(), committing it to the undo buffer
+		if (GEditor)
+		{
+			GEditor->UndoTransaction(/*bCanRedo=*/false);
+		}
+		else
+		{
+			Result.Report.AddWarning(TEXT("structure"), TEXT("<document>"), TEXT("GEditor unavailable; could not undo the validation transaction"));
+		}
+		Blueprint->GetOutermost()->SetDirtyFlag(bBlueprintWasDirty);
+		Result.CreatedNodes.Empty(); // nothing actually exists once the transaction is undone
 	}
 
 	// A note on bSelectImportedNodes: selecting nodes in a graph editor needs a live SGraphEditor
-	// widget, which this importer has no dependency on. Left to the caller (the Import panel, P3).
+	// widget, which this importer has no dependency on. Left to the caller (the Import panel).
 
 	Result.bSuccess = !Result.Report.HasErrors();
 	return Result;

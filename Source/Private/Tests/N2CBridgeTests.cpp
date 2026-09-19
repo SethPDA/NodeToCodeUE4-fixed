@@ -29,10 +29,14 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "GameFramework/Actor.h"
 #include "K2Node.h"
+#include "K2Node_Event.h"
+#include "K2Node_CallFunction.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "EdGraphUtilities.h"
+#include "EdGraphSchema_K2.h"
 #include "Editor.h"
 #include "UObject/Package.h"
 #include "AssetRegistryModule.h"
@@ -833,6 +837,160 @@ bool FN2CImporterRoundTripTest::RunTest(const FString& Parameters)
 	FAssetRegistryModule::AssetDeleted(DuplicatedBlueprint);
 	DuplicatedBlueprint->ClearFlags(RF_Standalone | RF_Public);
 	DuplicatedBlueprint->MarkPendingKill();
+
+	return true;
+}
+
+/**
+ * P3 acceptance test (docs §15): CopyAsNodes must not touch the context graph, and the exported
+ * clipboard text (native T3D via FEdGraphUtilities::ExportNodesToText) must paste identical nodes
+ * into another graph of the same Blueprint (docs §8.5) - exercised directly via
+ * FEdGraphUtilities::ImportNodesFromText rather than the OS clipboard, since that's the actual
+ * mechanism Ctrl+V uses.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FN2CImporterCopyAsNodesTest, "NodeToCode.Bridge.Import.CopyAsNodes", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FN2CImporterCopyAsNodesTest::RunTest(const FString& Parameters)
+{
+	UBlueprint* TestBlueprint = N2CBridgeTests::CreateTransientTestBlueprint(TEXT("N2CTestBP_CopyAsNodes"));
+	if (!TestNotNull(TEXT("Transient test Blueprint should be created"), TestBlueprint) || TestBlueprint->UbergraphPages.Num() == 0)
+	{
+		return false;
+	}
+	UEdGraph* SourceGraph = TestBlueprint->UbergraphPages[0];
+	const int32 SourceNodeCountBefore = SourceGraph->Nodes.Num();
+
+	// A second graph "of the same Blueprint" to paste into (§15 acceptance criterion). A function
+	// graph, deliberately: it can't host an Event node, so the source document below sticks to
+	// call_function nodes only, which are legal in any graph type.
+	UEdGraph* DestGraph = FBlueprintEditorUtils::CreateNewGraph(TestBlueprint, FName(TEXT("N2CTestDestFunc")), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+	FBlueprintEditorUtils::AddFunctionGraph<UClass>(TestBlueprint, DestGraph, /*bIsUserCreated=*/true, nullptr);
+
+	const FString SimpleJson = TEXT(R"({
+		"format": "n2c.graph", "version": 2,
+		"graphs": [{
+			"name": "EventGraph", "kind": "event_graph",
+			"nodes": [
+				{"id": "a", "kind": "call_function", "function": "Add_IntInt", "class": "KismetMathLibrary", "defaults": {"A": "1", "B": "2"}},
+				{"id": "b", "kind": "call_function", "function": "Multiply_IntInt", "class": "KismetMathLibrary", "defaults": {"B": "3"}}
+			],
+			"links": [["a.ReturnValue", "b.A"]]
+		}]
+	})");
+
+	FN2CImportOptions Options;
+	Options.Mode = EN2CImportMode::CopyAsNodes;
+	const FN2CImportResult CopyResult = FN2CGraphImporter::Import(SimpleJson, TestBlueprint, SourceGraph, Options);
+
+	if (!TestTrue(CopyResult.Report.ToText(), CopyResult.bSuccess))
+	{
+		return false;
+	}
+	TestFalse(TEXT("CopyAsNodes should populate ClipboardText"), CopyResult.ClipboardText.IsEmpty());
+	TestEqual(TEXT("CopyAsNodes should not modify the context graph it resolves self members against"), SourceGraph->Nodes.Num(), SourceNodeCountBefore);
+
+	TSet<UEdGraphNode*> ImportedNodes;
+	FEdGraphUtilities::ImportNodesFromText(DestGraph, CopyResult.ClipboardText, ImportedNodes);
+
+	TestEqual(TEXT("Pasting the copied text should produce 2 nodes"), ImportedNodes.Num(), 2);
+
+	bool bFoundAdd = false;
+	bool bFoundMultiply = false;
+	bool bLinkPreserved = false;
+	for (UEdGraphNode* Node : ImportedNodes)
+	{
+		UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node);
+		UFunction* Function = CallNode ? CallNode->GetTargetFunction() : nullptr;
+		if (!Function)
+		{
+			continue;
+		}
+		if (Function->GetName() == TEXT("Add_IntInt"))
+		{
+			bFoundAdd = true;
+			if (UEdGraphPin* ReturnPin = CallNode->FindPin(TEXT("ReturnValue"), EGPD_Output))
+			{
+				for (UEdGraphPin* Linked : ReturnPin->LinkedTo)
+				{
+					if (Linked && ImportedNodes.Contains(Linked->GetOwningNode()))
+					{
+						bLinkPreserved = true;
+					}
+				}
+			}
+		}
+		else if (Function->GetName() == TEXT("Multiply_IntInt"))
+		{
+			bFoundMultiply = true;
+		}
+	}
+	TestTrue(TEXT("Pasted nodes should include the Add_IntInt call"), bFoundAdd);
+	TestTrue(TEXT("Pasted nodes should include the Multiply_IntInt call"), bFoundMultiply);
+	TestTrue(TEXT("The data link between the pasted nodes should be preserved"), bLinkPreserved);
+
+	return true;
+}
+
+/**
+ * P3 acceptance test (docs §15): Validate must change nothing, including the package's dirty flag -
+ * Modify() dirties the package immediately and that isn't undone merely by cancelling the
+ * transaction, which is exactly the gap this test would have caught.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FN2CImporterValidateDoesNotDirtyTest, "NodeToCode.Bridge.Import.ValidateDoesNotDirty", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FN2CImporterValidateDoesNotDirtyTest::RunTest(const FString& Parameters)
+{
+	UBlueprint* TestBlueprint = N2CBridgeTests::CreateTransientTestBlueprint(TEXT("N2CTestBP_ValidateDirty"));
+	if (!TestNotNull(TEXT("Transient test Blueprint should be created"), TestBlueprint) || TestBlueprint->UbergraphPages.Num() == 0)
+	{
+		return false;
+	}
+	UEdGraph* EventGraph = TestBlueprint->UbergraphPages[0];
+
+	// Force a known, clean dirty state before the test exercises it
+	TestBlueprint->GetOutermost()->SetDirtyFlag(false);
+	const int32 NodeCountBefore = EventGraph->Nodes.Num();
+
+	const FString SimpleJson = TEXT(R"({
+		"format": "n2c.graph", "version": 2,
+		"graphs": [{
+			"name": "EventGraph", "kind": "event_graph",
+			"nodes": [
+				{"id": "begin", "kind": "event", "event": "ReceiveBeginPlay"},
+				{"id": "print", "kind": "call_function", "function": "PrintString", "class": "KismetSystemLibrary"}
+			],
+			"links": [["begin.then", "print.execute"]]
+		}]
+	})");
+
+	FN2CImportOptions Options;
+	Options.Mode = EN2CImportMode::ValidateOnly;
+	const FN2CImportResult Result = FN2CGraphImporter::Import(SimpleJson, TestBlueprint, EventGraph, Options);
+
+	TestTrue(Result.Report.ToText(), Result.bSuccess);
+	TestEqual(TEXT("Validate should not add any nodes"), EventGraph->Nodes.Num(), NodeCountBefore);
+	TestFalse(TEXT("Validate should not dirty the package"), TestBlueprint->GetOutermost()->IsDirty());
+
+	return true;
+}
+
+/**
+ * P3 acceptance test (docs §15, §10.2): a document wrapped in a ```json fence or surrounding prose
+ * must be accepted, exactly as the Import panel's text box does before calling Import().
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FN2CImporterExtractJsonTest, "NodeToCode.Bridge.Import.ExtractJsonFromFencesOrProse", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FN2CImporterExtractJsonTest::RunTest(const FString& Parameters)
+{
+	const FString Clean = TEXT("{\"format\":\"n2c.graph\",\"version\":2,\"graphs\":[]}");
+
+	const FString Fenced = FString::Printf(TEXT("Sure, here's the graph:\n```json\n%s\n```\nLet me know if you'd like changes."), *Clean);
+	TestEqual(TEXT("A ```json fence should be stripped"), FN2CGraphImporter::ExtractJsonDocument(Fenced), Clean);
+
+	const FString Prose = FString::Printf(TEXT("Here is the document: %s - hope that helps!"), *Clean);
+	TestEqual(TEXT("A JSON object embedded in prose should be extracted"), FN2CGraphImporter::ExtractJsonDocument(Prose), Clean);
+
+	TestEqual(TEXT("Already-clean JSON should be returned unchanged"), FN2CGraphImporter::ExtractJsonDocument(Clean), Clean);
 
 	return true;
 }
